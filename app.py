@@ -1,5 +1,6 @@
 from flask import Flask, render_template
 from flask_socketio import SocketIO, emit
+from flask_cors import CORS
 import asyncio
 import threading
 import json
@@ -25,6 +26,15 @@ from liquidation_bot import stats, process_liquidation, connect_websocket, set_w
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your_secret_key_here')
+CORS(app, resources={
+    r"/*": {
+        "origins": "*",
+        "allow_headers": ["Content-Type"],
+        "expose_headers": ["Content-Range", "X-Content-Range"],
+        "supports_credentials": True
+    }
+})
+
 socketio = SocketIO(
     app,
     cors_allowed_origins="*",
@@ -38,7 +48,8 @@ socketio = SocketIO(
     reconnection=True,
     reconnection_attempts=5,
     reconnection_delay=1000,
-    reconnection_delay_max=5000
+    reconnection_delay_max=5000,
+    path='/socket.io'  # Explicitly set the Socket.IO path
 )
 
 # Store the latest statistics
@@ -52,10 +63,19 @@ latest_stats = {
 def index():
     return render_template('index.html')
 
+@app.after_request
+def after_request(response):
+    """Add headers to every response."""
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+    response.headers.add('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+    response.headers.add('Access-Control-Allow-Credentials', 'true')
+    return response
+
 @socketio.on('connect')
 def handle_connect():
     try:
-        logger.info("Client connected")
+        logger.info(f"Client connected via {request.environ.get('wsgi.url_scheme', 'unknown')}")
         # Send current stats to newly connected client
         emit('stats_update', latest_stats)
     except Exception as e:
