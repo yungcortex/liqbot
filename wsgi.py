@@ -1,5 +1,5 @@
 import eventlet
-eventlet.monkey_patch()
+eventlet.monkey_patch(socket=True, select=True)
 
 from app import app, socketio, background_tasks
 import threading

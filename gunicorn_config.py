@@ -3,8 +3,8 @@ worker_class = "eventlet"
 workers = 1
 worker_connections = 1000
 keepalive = 120
-timeout = 300
-graceful_timeout = 300
+timeout = 0  # Disable timeout for WebSocket connections
+graceful_timeout = 60
 max_requests = 0
 max_requests_jitter = 0
 
@@ -17,7 +17,9 @@ access_log_format = '%(h)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s "%(f)s" "%(a)s"
 # Environment settings
 raw_env = [
     'PYTHONUNBUFFERED=1',
-    'EVENTLET_NO_GREENDNS=yes'
+    'EVENTLET_NO_GREENDNS=yes',
+    'EVENTLET_WEBSOCKET=true',
+    'EVENTLET_SERVE_METHOD=eventlet'
 ]
 
 # Worker settings
@@ -31,9 +33,9 @@ wsgi_app = "wsgi:application"
 
 # Additional settings for better WebSocket handling
 worker_class_args = {
-    'worker_connections': 2000,
+    'worker_connections': 1000,
     'keepalive': 120,
-    'client_timeout': 300,
+    'client_timeout': 0,  # Disable client timeout for WebSocket
     'websocket_max_message_size': 0,
     'websocket_ping_interval': 25,
     'websocket_ping_timeout': 120
