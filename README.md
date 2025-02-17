@@ -20,8 +20,8 @@ A real-time cryptocurrency liquidation tracker for Bybit. Monitor BTC, ETH, and 
 1. Make sure you have Python 3.7+ installed
 2. Download or clone this repository:
 ```bash
-git clone https://github.com/yungcortex/liquitation_bot.git
-cd liquitation_bot
+git clone https://github.com/yungcortex/liqbot.git
+cd liqbot
 ```
 
 3. Create and activate a virtual environment:
@@ -51,7 +51,7 @@ You can run the bot in either terminal mode or web interface mode:
 
 1. Navigate to the project directory:
 ```bash
-cd "path/to/liquidation-bot"
+cd "path/to/liqbot"
 ```
 2. Activate the virtual environment (if not already activated):
    - Windows: `.venv\Scripts\activate`
@@ -65,7 +65,7 @@ python liquidation_bot.py
 
 1. Navigate to the project directory:
 ```bash
-cd "path/to/liquidation-bot"
+cd "path/to/liqbot"
 ```
 2. Activate the virtual environment (if not already activated):
    - Windows: `.venv\Scripts\activate`
