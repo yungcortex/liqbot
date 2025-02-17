@@ -9,7 +9,7 @@ import os
 
 # Add parent directory to path to import liquidation_bot
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from liquidation_bot import stats, process_liquidation, connect_websocket
+from liquidation_bot import stats, process_liquidation, connect_websocket, set_web_update_callback
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your_secret_key_here'
@@ -26,14 +26,18 @@ latest_stats = {
 def index():
     return render_template('index.html')
 
-def update_stats(data):
-    """Update statistics and emit to connected clients"""
-    global latest_stats
-    latest_stats = data
-    socketio.emit('stats_update', data)
+def emit_update(data, event_type='stats_update'):
+    """Emit updates to all connected clients"""
+    try:
+        socketio.emit(event_type, data)
+    except Exception as e:
+        print(f"Error emitting {event_type}: {e}")
 
 async def run_liquidation_bot():
     """Run the liquidation bot and forward updates to web clients"""
+    # Set the callback for web updates
+    set_web_update_callback(emit_update)
+    
     while True:
         try:
             await connect_websocket()
@@ -48,10 +52,13 @@ def background_tasks():
     loop.run_until_complete(run_liquidation_bot())
 
 if __name__ == '__main__':
+    print("Starting Liquidation Tracker Web Interface...")
+    print("Visit http://localhost:8080 in your browser")
+    
     # Start the liquidation bot in a separate thread
     bot_thread = threading.Thread(target=background_tasks)
     bot_thread.daemon = True
     bot_thread.start()
     
     # Run the Flask application
-    socketio.run(app, debug=True, use_reloader=False) 
+    socketio.run(app, debug=True, use_reloader=False, port=8080) 

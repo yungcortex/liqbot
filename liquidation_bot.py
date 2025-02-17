@@ -26,6 +26,7 @@ liquidation_log = deque(maxlen=50)
 web_update_callback = None
 
 def set_web_update_callback(callback):
+    """Set the callback function for web updates"""
     global web_update_callback
     web_update_callback = callback
 
@@ -119,10 +120,11 @@ def process_liquidation(message):
                 
                 # Send update to web interface if callback is set
                 if web_update_callback:
-                    web_update_callback(stats)
-                    web_update_callback({
-                        "message": f"{update_time} 🔥 {'LONG' if side == 'Buy' else 'SHORT'} LIQ {base_asset}: ${value:,.2f} @ ${price:,.2f}"
-                    }, event_type='liquidation')
+                    # Send stats update
+                    web_update_callback(stats, event_type='stats_update')
+                    # Send liquidation message
+                    clean_message = f"{update_time} 🔥 {'LONG' if side == 'Buy' else 'SHORT'} LIQ {base_asset}: ${value:,.2f} @ ${price:,.2f}"
+                    web_update_callback({"message": clean_message}, event_type='liquidation')
 
     except Exception as e:
         error_log = f"[yellow]{datetime.now().strftime('%H:%M:%S')} Error processing message: {str(e)}[/yellow]"
@@ -231,4 +233,4 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        console.print("\n[bold red]Shutting down...[/bold red]") 
+        console.print("\n[bold red]Shutting down...[/bold red]")
