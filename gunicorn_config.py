@@ -2,10 +2,10 @@ worker_class = 'eventlet'
 wsgi_app = 'wsgi:application'
 bind = "0.0.0.0:10000"
 workers = 1
-worker_connections = 1000
-keepalive = 65
-timeout = 120
-graceful_timeout = 120
+worker_connections = 2000
+keepalive = 120
+timeout = 300
+graceful_timeout = 300
 forwarded_allow_ips = '*'
 proxy_protocol = True
 proxy_allow_ips = '*'
@@ -26,11 +26,23 @@ raw_env = [
     'PYTHONUNBUFFERED=1',
     'EVENTLET_NO_GREENDNS=yes',
     'EVENTLET_WEBSOCKET=True',
-    'EVENTLET_SERVE_METHOD=eventlet'
+    'EVENTLET_SERVE_METHOD=eventlet',
+    'EVENTLET_CLIENT_CONNECT_TIMEOUT=300',
+    'EVENTLET_SOCKET_TIMEOUT=300'
 ]
 
 # WebSocket specific settings
 websocket_ping_interval = 25
-websocket_ping_timeout = 60
+websocket_ping_timeout = 120
 websocket_max_message_size = 0
-worker_tmp_dir = '/dev/shm' 
+worker_tmp_dir = '/dev/shm'
+
+# Additional settings for better WebSocket handling
+worker_class_args = {
+    'worker_connections': 2000,
+    'keepalive': 120,
+    'client_timeout': 300,
+    'websocket_max_message_size': 0,
+    'websocket_ping_interval': 25,
+    'websocket_ping_timeout': 120
+} 

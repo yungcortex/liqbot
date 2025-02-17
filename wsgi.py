@@ -1,23 +1,24 @@
 import eventlet
 eventlet.monkey_patch()
 
-import os
-import threading
 from app import app, socketio, background_tasks
+import threading
 
 # Start the liquidation bot in a separate thread
 bot_thread = threading.Thread(target=background_tasks)
 bot_thread.daemon = True
 bot_thread.start()
 
-# This is what Gunicorn uses
-application = app  # Changed from socketio.middleware(app)
+# Use Werkzeug middleware for production
+application = app.wsgi_app
 
+# Make the application available to Gunicorn
 if __name__ == '__main__':
     socketio.run(
         app,
         host='0.0.0.0',
-        port=int(os.environ.get('PORT', 10000)),
+        port=10000,
         debug=True,
-        use_reloader=False
+        use_reloader=False,
+        log_output=True
     ) 

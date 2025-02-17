@@ -41,7 +41,7 @@ socketio = SocketIO(
     async_mode='eventlet',
     logger=True,
     engineio_logger=True,
-    ping_timeout=60,
+    ping_timeout=120,
     ping_interval=25,
     max_http_buffer_size=1e8,
     async_handlers=True,
@@ -58,7 +58,10 @@ socketio = SocketIO(
     channel='socketio',
     write_only=False,
     json=None,
-    async_handlers_pool_size=100
+    async_handlers_pool_size=100,
+    client_manager_ping_timeout=120,
+    client_manager_ping_interval=25,
+    client_manager_ping_max_missed=3
 )
 
 # Add parent directory to path to import liquidation_bot
@@ -226,12 +229,18 @@ if __name__ == '__main__':
     bot_thread.daemon = True
     bot_thread.start()
     
-    # Run the Flask application
+    # Run the Flask application with updated settings
     socketio.run(
         app,
         host='0.0.0.0',
         port=int(os.environ.get('PORT', 10000)),
         debug=True,
         use_reloader=False,
-        log_output=True
+        log_output=True,
+        websocket=True,
+        allow_upgrades=True,
+        ping_timeout=120,
+        ping_interval=25,
+        max_http_buffer_size=1e8,
+        cors_allowed_origins="*"
     ) 
