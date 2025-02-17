@@ -220,11 +220,12 @@
     <script>
         // Get the current host from the window location
         const host = window.location.hostname;
-        const protocol = window.location.protocol;
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const port = window.location.port ? `:${window.location.port}` : '';
         
         // Configure Socket.IO to connect to the correct endpoint
         const socket = io({
-            path: '/socket.io',
+            path: '/socket.io/',  // Make sure to include the trailing slash
             transports: ['websocket', 'polling'],
             reconnection: true,
             reconnectionAttempts: Infinity,
@@ -234,8 +235,12 @@
             autoConnect: true,
             forceNew: true,
             // Explicitly set the Socket.IO URL to match the current host
-            url: `${protocol}//${host}`,
-            withCredentials: true
+            url: `${window.location.protocol}//${host}${port}`,
+            withCredentials: false,  // Changed to false for Render
+            extraHeaders: {
+                "Proxy-Connection": "Upgrade",
+                "Connection": "upgrade"
+            }
         });
 
         const feed = document.getElementById('liquidation-feed');

@@ -1,4 +1,4 @@
-from flask import Flask, render_template
+from flask import Flask, render_template, request
 from flask_socketio import SocketIO, emit
 from flask_cors import CORS
 import asyncio
@@ -9,6 +9,7 @@ import sys
 import os
 import logging
 import eventlet
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 # Configure logging
 logging.basicConfig(
@@ -25,7 +26,13 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from liquidation_bot import stats, process_liquidation, connect_websocket, set_web_update_callback
 
 app = Flask(__name__)
+# Handle proxy headers
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1, x_prefix=1)
+
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your_secret_key_here')
+app.config['CORS_SUPPORTS_CREDENTIALS'] = True
+app.config['CORS_EXPOSE_HEADERS'] = ['Content-Range', 'X-Content-Range']
+
 CORS(app, resources={
     r"/*": {
         "origins": "*",
@@ -49,7 +56,10 @@ socketio = SocketIO(
     reconnection_attempts=5,
     reconnection_delay=1000,
     reconnection_delay_max=5000,
-    path='/socket.io'  # Explicitly set the Socket.IO path
+    path='/socket.io/',  # Make sure to include the trailing slash
+    always_connect=True,
+    manage_session=True,
+    websocket=True
 )
 
 # Store the latest statistics
