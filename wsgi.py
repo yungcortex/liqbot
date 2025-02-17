@@ -9,10 +9,10 @@ bot_thread = threading.Thread(target=background_tasks)
 bot_thread.daemon = True
 bot_thread.start()
 
-# Use Werkzeug middleware for production
-application = app.wsgi_app
+# Create the WSGI application with Socket.IO middleware
+application = socketio.middleware(app)
 
-# Make the application available to Gunicorn
+# For local development
 if __name__ == '__main__':
     socketio.run(
         app,
