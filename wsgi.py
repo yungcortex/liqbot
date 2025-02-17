@@ -11,7 +11,13 @@ bot_thread.daemon = True
 bot_thread.start()
 
 # This is what Gunicorn uses
-application = socketio.middleware(app)
+application = app  # Changed from socketio.middleware(app)
 
 if __name__ == '__main__':
-    socketio.run(app, host='0.0.0.0', port=int(os.environ.get('PORT', 10000))) 
+    socketio.run(
+        app,
+        host='0.0.0.0',
+        port=int(os.environ.get('PORT', 10000)),
+        debug=True,
+        use_reloader=False
+    ) 

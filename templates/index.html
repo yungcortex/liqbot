@@ -218,16 +218,10 @@
     </div>
 
     <script>
-        // Get the current host from the window location
-        const host = window.location.hostname;
-        const protocol = window.location.protocol;
-        const port = window.location.port ? `:${window.location.port}` : '';
-        const wsProtocol = protocol === 'https:' ? 'wss:' : 'ws:';
-        
         // Configure Socket.IO to connect to the correct endpoint
         const socket = io({
             path: '/socket.io/',
-            transports: ['websocket', 'polling'],
+            transports: ['websocket'],  // Try WebSocket first
             reconnection: true,
             reconnectionAttempts: Infinity,
             reconnectionDelay: 1000,
@@ -235,17 +229,11 @@
             timeout: 20000,
             autoConnect: true,
             forceNew: true,
-            upgrade: true,
-            rememberUpgrade: true,
-            secure: protocol === 'https:',
+            secure: window.location.protocol === 'https:',
             rejectUnauthorized: false,
-            // Explicitly set the Socket.IO URL to match the current host
-            url: `${protocol}//${host}${port}`,
-            extraHeaders: {
-                "Proxy-Connection": "Upgrade",
-                "Connection": "upgrade",
-                "Upgrade": "websocket"
-            }
+            withCredentials: false,
+            upgrade: true,
+            rememberUpgrade: true
         });
 
         // Create a heartbeat mechanism
@@ -261,7 +249,6 @@
 
         const feed = document.getElementById('liquidation-feed');
         let reconnectAttempts = 0;
-        let currentTransport = 'websocket';
         
         // Add connection status logging
         socket.on('connect', () => {
@@ -279,57 +266,12 @@
 
         socket.on('connect_error', (error) => {
             console.error('Connection error:', error);
-            reconnectAttempts++;
-            clearInterval(heartbeatInterval);  // Clear heartbeat on connection error
-            
-            const indicator = document.createElement('div');
-            indicator.className = 'terminal-line';
-            indicator.style.color = '#ff9900';
-            
-            // Check if it's a 404 error
-            if (error.message.includes('404')) {
-                indicator.innerHTML = `⚠️ Server endpoint not found (404). Retrying...`;
-                // Try alternative Socket.IO path
-                socket.io.opts.path = '/ws';
-            } else {
-                indicator.innerHTML = `⚠️ Connection error (attempt ${reconnectAttempts}): ${error.message}`;
+            // If WebSocket fails, try polling
+            if (socket.io.opts.transports[0] === 'websocket') {
+                console.log('Falling back to polling transport');
+                socket.io.opts.transports = ['polling', 'websocket'];
+                socket.connect();
             }
-            
-            feed.insertBefore(indicator, feed.firstChild);
-
-            // If websocket fails multiple times, try polling
-            if (reconnectAttempts === 3 && currentTransport === 'websocket') {
-                console.log('Switching to polling transport...');
-                currentTransport = 'polling';
-                socket.io.opts.transports = ['polling'];
-                
-                const transportIndicator = document.createElement('div');
-                transportIndicator.className = 'terminal-line';
-                transportIndicator.style.color = '#ff9900';
-                transportIndicator.innerHTML = '⚠️ Switching to polling transport...';
-                feed.insertBefore(transportIndicator, feed.firstChild);
-            }
-            
-            // If polling also fails after 3 attempts, try websocket again
-            if (reconnectAttempts === 6 && currentTransport === 'polling') {
-                console.log('Switching back to websocket transport...');
-                currentTransport = 'websocket';
-                socket.io.opts.transports = ['websocket'];
-                
-                const transportIndicator = document.createElement('div');
-                transportIndicator.className = 'terminal-line';
-                transportIndicator.style.color = '#ff9900';
-                transportIndicator.innerHTML = '⚠️ Switching back to WebSocket transport...';
-                feed.insertBefore(transportIndicator, feed.firstChild);
-            }
-
-            // Force reconnect after 10 seconds if still disconnected
-            setTimeout(() => {
-                if (!socket.connected) {
-                    console.log('Forcing reconnection...');
-                    socket.connect();
-                }
-            }, 10000);
         });
 
         socket.on('disconnect', () => {
@@ -361,18 +303,26 @@
             feed.insertBefore(indicator, feed.firstChild);
         });
 
-        // Add reconnect event handlers
+        // Add reconnect event handlers with better visual feedback
+        socket.io.on('reconnect_attempt', (attempt) => {
+            console.log('Attempting to reconnect:', attempt);
+            const indicator = document.createElement('div');
+            indicator.className = 'terminal-line';
+            indicator.style.color = '#ffff00';
+            indicator.innerHTML = `🔄 Reconnection attempt ${attempt}...`;
+            feed.insertBefore(indicator, feed.firstChild);
+        });
+
         socket.io.on('reconnect', (attempt) => {
             console.log('Reconnected on attempt:', attempt);
             const indicator = document.createElement('div');
             indicator.className = 'terminal-line';
             indicator.style.color = '#00ff00';
-            indicator.innerHTML = `🔄 Reconnected after ${attempt} attempts`;
+            indicator.innerHTML = `✅ Reconnected after ${attempt} attempts`;
             feed.insertBefore(indicator, feed.firstChild);
-        });
-
-        socket.io.on('reconnect_attempt', (attempt) => {
-            console.log('Attempting to reconnect:', attempt);
+            
+            // Request latest stats after reconnection
+            socket.emit('get_stats');
         });
         
         function formatNumber(num) {
@@ -390,38 +340,63 @@
             }
             console.log(`Updating ${elementId} with value:`, newValue);
             element.classList.add('glitch-animation');
-            element.textContent = newValue;
+            if (typeof newValue === 'number') {
+                element.textContent = newValue;
+            } else {
+                element.textContent = newValue.toString();
+            }
             setTimeout(() => {
                 element.classList.remove('glitch-animation');
             }, 200);
         }
 
         socket.on('stats_update', function(data) {
-            console.log('Received stats update:', data);
-            // Update statistics with glitch effect
-            updateElementWithGlitch('btc-longs', data.BTC.longs);
-            updateElementWithGlitch('btc-shorts', data.BTC.shorts);
-            updateElementWithGlitch('btc-total', formatNumber(data.BTC.total_value));
-            
-            updateElementWithGlitch('eth-longs', data.ETH.longs);
-            updateElementWithGlitch('eth-shorts', data.ETH.shorts);
-            updateElementWithGlitch('eth-total', formatNumber(data.ETH.total_value));
-            
-            updateElementWithGlitch('sol-longs', data.SOL.longs);
-            updateElementWithGlitch('sol-shorts', data.SOL.shorts);
-            updateElementWithGlitch('sol-total', formatNumber(data.SOL.total_value));
+            console.log('Received stats update:', JSON.stringify(data, null, 2));
+            try {
+                // Update Bitcoin stats
+                if (data.BTC) {
+                    console.log('Updating BTC stats:', data.BTC);
+                    updateElementWithGlitch('btc-longs', data.BTC.longs);
+                    updateElementWithGlitch('btc-shorts', data.BTC.shorts);
+                    updateElementWithGlitch('btc-total', formatNumber(data.BTC.total_value));
+                }
+                
+                // Update Ethereum stats
+                if (data.ETH) {
+                    console.log('Updating ETH stats:', data.ETH);
+                    updateElementWithGlitch('eth-longs', data.ETH.longs);
+                    updateElementWithGlitch('eth-shorts', data.ETH.shorts);
+                    updateElementWithGlitch('eth-total', formatNumber(data.ETH.total_value));
+                }
+                
+                // Update Solana stats
+                if (data.SOL) {
+                    console.log('Updating SOL stats:', data.SOL);
+                    updateElementWithGlitch('sol-longs', data.SOL.longs);
+                    updateElementWithGlitch('sol-shorts', data.SOL.shorts);
+                    updateElementWithGlitch('sol-total', formatNumber(data.SOL.total_value));
+                }
+            } catch (error) {
+                console.error('Error updating stats:', error, 'Data:', data);
+            }
         });
 
         socket.on('liquidation', function(data) {
-            console.log('Received liquidation:', data);
-            const div = document.createElement('div');
-            div.className = `terminal-line ${data.side.toLowerCase()}`;
-            div.innerHTML = `${data.symbol} ${data.side} liquidation: ${formatNumber(data.amount)} @ ${data.price}`;
-            feed.insertBefore(div, feed.firstChild);
-            
-            // Keep only last 100 entries
-            if (feed.children.length > 100) {
-                feed.removeChild(feed.lastChild);
+            console.log('Received liquidation:', JSON.stringify(data, null, 2));
+            try {
+                const div = document.createElement('div');
+                div.className = `terminal-line ${data.side.toLowerCase()}`;
+                const formattedAmount = formatNumber(data.amount);
+                const formattedValue = formatNumber(data.value);
+                div.innerHTML = `${data.symbol} ${data.side} liquidation: ${formattedAmount} @ ${data.price} (${formattedValue})`;
+                feed.insertBefore(div, feed.firstChild);
+                
+                // Keep only last 100 entries
+                if (feed.children.length > 100) {
+                    feed.removeChild(feed.lastChild);
+                }
+            } catch (error) {
+                console.error('Error displaying liquidation:', error, 'Data:', data);
             }
         });
     </script>

@@ -26,18 +26,13 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1, x_
 
 # Configure app
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your_secret_key_here')
-app.config['CORS_SUPPORTS_CREDENTIALS'] = True
+app.config['CORS_SUPPORTS_CREDENTIALS'] = False
 app.config['CORS_EXPOSE_HEADERS'] = ['Content-Range', 'X-Content-Range']
+app.config['DEBUG'] = True
+app.config['PROPAGATE_EXCEPTIONS'] = True
 
-# Initialize CORS
-CORS(app, resources={
-    r"/*": {
-        "origins": "*",
-        "allow_headers": ["Content-Type"],
-        "expose_headers": ["Content-Range", "X-Content-Range"],
-        "supports_credentials": True
-    }
-})
+# Initialize CORS with simpler configuration
+CORS(app, resources={r"/*": {"origins": "*"}})
 
 # Initialize SocketIO
 socketio = SocketIO(
@@ -51,8 +46,14 @@ socketio = SocketIO(
     max_http_buffer_size=1e8,
     async_handlers=True,
     path='/socket.io/',
-    manage_session=True,
-    websocket=True
+    manage_session=False,
+    websocket=True,
+    allow_upgrades=True,
+    cookie=None,
+    always_connect=True,
+    transports=['websocket', 'polling'],
+    cors_credentials=False,
+    max_queue_size=10
 )
 
 # Add parent directory to path to import liquidation_bot
@@ -76,7 +77,7 @@ def after_request(response):
     response.headers.add('Access-Control-Allow-Origin', '*')
     response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
     response.headers.add('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-    response.headers.add('Access-Control-Allow-Credentials', 'true')
+    response.headers.add('Cache-Control', 'no-cache')
     return response
 
 @socketio.on('connect')
@@ -104,6 +105,16 @@ def handle_heartbeat():
     except Exception as e:
         logger.error(f"Error in handle_heartbeat: {e}")
 
+@socketio.on('get_stats')
+def handle_get_stats():
+    """Handle requests for current statistics"""
+    try:
+        with app.app_context():
+            emit('stats_update', latest_stats)
+            logger.debug("Sent stats update in response to get_stats request")
+    except Exception as e:
+        logger.error(f"Error in handle_get_stats: {e}")
+
 def emit_update(data, event_type='stats_update'):
     """Emit updates to all connected clients"""
     try:
@@ -121,32 +132,67 @@ def process_liquidation_event(data):
     """Process a liquidation event and emit it to clients"""
     try:
         with app.app_context():
-            # Extract relevant information
-            symbol = data.get('symbol', '')
-            side = 'LONG' if data.get('side', '').upper() == 'BUY' else 'SHORT'
-            amount = float(data.get('amount', 0))
-            price = float(data.get('price', 0))
+            logger.debug(f"Received liquidation data: {data}")
             
-            # Update stats
+            # Handle Bybit's data format
+            if isinstance(data, dict):
+                if 'data' in data:
+                    liquidation_data = data['data']
+                else:
+                    liquidation_data = data
+            else:
+                logger.error(f"Invalid data format received: {data}")
+                return
+            
+            # Extract the symbol (remove USDT suffix)
+            symbol = liquidation_data.get('symbol', '').replace('USDT', '')
+            
+            # Get the size and price
+            try:
+                # Bybit uses 'size' for amount
+                amount = float(liquidation_data.get('size', liquidation_data.get('qty', 0)))
+                price = float(liquidation_data.get('price', 0))
+                value = amount * price
+            except (ValueError, TypeError):
+                logger.error(f"Error converting size/price: {liquidation_data}")
+                return
+            
+            # Determine if it's a long or short liquidation
+            side = 'LONG' if liquidation_data.get('side', '').upper() == 'BUY' else 'SHORT'
+            
+            logger.info(f"Processing liquidation: {symbol} {side} {amount} @ {price} = ${value}")
+            
+            # Update stats if we have a valid symbol
             if symbol in latest_stats:
+                # Update the stats
                 if side == 'LONG':
                     latest_stats[symbol]['longs'] += 1
                 else:
                     latest_stats[symbol]['shorts'] += 1
-                latest_stats[symbol]['total_value'] += amount * price
-            
-            # Emit both the liquidation event and updated stats
-            logger.info(f"Processing liquidation: {symbol} {side} {amount} @ {price}")
-            
-            socketio.emit('liquidation', {
-                'symbol': symbol,
-                'side': side,
-                'amount': amount,
-                'price': price
-            })
-            socketio.emit('stats_update', latest_stats)
+                latest_stats[symbol]['total_value'] += value
+                
+                # First emit the liquidation event
+                liquidation_event = {
+                    'symbol': symbol,
+                    'side': side,
+                    'amount': amount,
+                    'price': price,
+                    'value': value,
+                    'timestamp': liquidation_data.get('updatedTime', datetime.now().timestamp())
+                }
+                
+                logger.debug(f"Emitting liquidation event: {liquidation_event}")
+                socketio.emit('liquidation', liquidation_event)
+                
+                # Then emit the updated stats
+                logger.debug(f"Emitting updated stats: {latest_stats}")
+                socketio.emit('stats_update', latest_stats)
+                
+                logger.info(f"Updated {symbol} stats - Longs: {latest_stats[symbol]['longs']}, Shorts: {latest_stats[symbol]['shorts']}, Total: ${latest_stats[symbol]['total_value']:.2f}")
+            else:
+                logger.warning(f"Received liquidation for unknown symbol: {symbol}")
     except Exception as e:
-        logger.error(f"Error processing liquidation: {e}")
+        logger.error(f"Error processing liquidation: {e}", exc_info=True)
 
 async def run_liquidation_bot():
     """Run the liquidation bot and forward updates to web clients"""
