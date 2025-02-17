@@ -11,7 +11,7 @@ workers = 1
 worker_connections = 1000
 
 # Timeouts
-timeout = 0  # Disable timeout for WebSocket connections
+timeout = 300  # 5 minutes
 keepalive = 120
 graceful_timeout = 60
 
@@ -34,19 +34,15 @@ preload_app = True
 def post_fork(server, worker):
     """Monkey patch after forking worker processes."""
     eventlet.monkey_patch()
-    # Set a longer WebSocket timeout
-    worker.wsgi_app.socket_timeout = 300
 
 def worker_int(worker):
     """Handle worker interruption signals."""
     worker.log.info("worker received INT or QUIT signal")
-    import sys, traceback
-    traceback.print_stack(file=sys.stdout)
 
 # WebSocket specific settings
 worker_class_args = {
-    'client_timeout': None,  # Disable client timeout
+    'worker_connections': 1000,
     'websocket_max_message_size': 16 * 1024 * 1024,  # 16MB
     'websocket_ping_interval': 25,  # Send ping every 25 seconds
-    'websocket_ping_timeout': 60,  # Wait 60 seconds for pong response
+    'websocket_ping_timeout': 120  # Wait 120 seconds for pong response
 } 
