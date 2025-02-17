@@ -5,105 +5,223 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Crypto Liquidation Tracker</title>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <style>
-        .liquidation-log {
+        @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
+        
+        body {
+            background-color: #000;
+            color: #00ff00;
+            font-family: 'Share Tech Mono', monospace;
+            text-shadow: 0 0 5px #00ff00;
+            min-height: 100vh;
+            position: relative;
+        }
+
+        body::before {
+            content: "";
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: repeating-linear-gradient(
+                0deg,
+                rgba(0, 0, 0, 0.15),
+                rgba(0, 0, 0, 0.15) 1px,
+                transparent 1px,
+                transparent 2px
+            );
+            pointer-events: none;
+            z-index: 1;
+            animation: scan 10s linear infinite;
+        }
+
+        @keyframes scan {
+            from { transform: translateY(0); }
+            to { transform: translateY(100px); }
+        }
+
+        .crypto-card {
+            background: rgba(0, 20, 0, 0.7);
+            border: 1px solid #00ff00;
+            box-shadow: 0 0 20px rgba(0, 255, 0, 0.1);
+            backdrop-filter: blur(5px);
+            transition: all 0.3s ease;
+        }
+
+        .crypto-card:hover {
+            box-shadow: 0 0 30px rgba(0, 255, 0, 0.2);
+            transform: translateY(-2px);
+        }
+
+        .liquidation-feed {
+            background: rgba(0, 10, 0, 0.9);
+            border: 1px solid #00ff00;
             height: 400px;
             overflow-y: auto;
+            font-family: 'Share Tech Mono', monospace;
         }
-        .long-liq {
-            color: #10B981;
+
+        .liquidation-feed::-webkit-scrollbar {
+            width: 8px;
         }
-        .short-liq {
-            color: #EF4444;
+
+        .liquidation-feed::-webkit-scrollbar-track {
+            background: rgba(0, 20, 0, 0.7);
+        }
+
+        .liquidation-feed::-webkit-scrollbar-thumb {
+            background: #00ff00;
+            border-radius: 4px;
+        }
+
+        .long {
+            color: #00ff00;
+            text-shadow: 0 0 5px #00ff00;
+        }
+
+        .short {
+            color: #ff0000;
+            text-shadow: 0 0 5px #ff0000;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            letter-spacing: 2px;
+            position: relative;
+            display: inline-block;
+        }
+
+        h1::after {
+            content: "";
+            position: absolute;
+            bottom: -5px;
+            left: 0;
+            width: 100%;
+            height: 2px;
+            background: #00ff00;
+            box-shadow: 0 0 10px #00ff00;
+        }
+
+        .value {
+            font-size: 1.5rem;
+            font-weight: bold;
+        }
+
+        .crypto-icon {
+            font-size: 2rem;
+            margin-right: 0.5rem;
+        }
+
+        /* Glitch effect for numbers */
+        .glitch-number {
+            position: relative;
+            animation: glitch 0.5s infinite;
+        }
+
+        @keyframes glitch {
+            0% { transform: translate(0); }
+            20% { transform: translate(-2px, 2px); }
+            40% { transform: translate(-2px, -2px); }
+            60% { transform: translate(2px, 2px); }
+            80% { transform: translate(2px, -2px); }
+            100% { transform: translate(0); }
+        }
+
+        .terminal-line {
+            padding: 0.5rem;
+            border-bottom: 1px solid rgba(0, 255, 0, 0.1);
+            transition: all 0.3s ease;
+        }
+
+        .terminal-line:hover {
+            background: rgba(0, 255, 0, 0.1);
         }
     </style>
 </head>
-<body class="bg-gray-900 text-white">
-    <div class="container mx-auto px-4 py-8">
-        <h1 class="text-4xl font-bold mb-8 text-center">Crypto Liquidation Tracker</h1>
+<body class="p-8">
+    <div class="container mx-auto">
+        <h1 class="text-center mb-8">Crypto Liquidation Tracker</h1>
         
-        <!-- Stats Grid -->
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-            <!-- BTC Card -->
-            <div class="bg-gray-800 rounded-lg p-6">
-                <h2 class="text-2xl font-bold mb-4 flex items-center">
-                    <img src="https://cryptologos.cc/logos/bitcoin-btc-logo.png" class="w-8 h-8 mr-2" alt="BTC">
-                    Bitcoin
-                </h2>
+            <!-- Bitcoin Card -->
+            <div class="crypto-card rounded-lg p-6">
+                <div class="flex items-center mb-4">
+                    <span class="crypto-icon">₿</span>
+                    <h2 class="text-xl">Bitcoin</h2>
+                </div>
                 <div class="grid grid-cols-2 gap-4">
                     <div>
-                        <p class="text-gray-400">Long Liqs</p>
-                        <p class="text-2xl font-bold text-green-500" id="btc-longs">0</p>
+                        <p>Long Liqs</p>
+                        <p class="value glitch-number" id="btc-longs">0</p>
                     </div>
                     <div>
-                        <p class="text-gray-400">Short Liqs</p>
-                        <p class="text-2xl font-bold text-red-500" id="btc-shorts">0</p>
+                        <p>Short Liqs</p>
+                        <p class="value glitch-number" id="btc-shorts">0</p>
                     </div>
-                    <div class="col-span-2">
-                        <p class="text-gray-400">Total Value</p>
-                        <p class="text-2xl font-bold" id="btc-total">$0.00</p>
-                    </div>
+                </div>
+                <div class="mt-4">
+                    <p>Total Value</p>
+                    <p class="value glitch-number" id="btc-total">$0.00</p>
                 </div>
             </div>
 
-            <!-- ETH Card -->
-            <div class="bg-gray-800 rounded-lg p-6">
-                <h2 class="text-2xl font-bold mb-4 flex items-center">
-                    <img src="https://cryptologos.cc/logos/ethereum-eth-logo.png" class="w-8 h-8 mr-2" alt="ETH">
-                    Ethereum
-                </h2>
+            <!-- Ethereum Card -->
+            <div class="crypto-card rounded-lg p-6">
+                <div class="flex items-center mb-4">
+                    <span class="crypto-icon">Ξ</span>
+                    <h2 class="text-xl">Ethereum</h2>
+                </div>
                 <div class="grid grid-cols-2 gap-4">
                     <div>
-                        <p class="text-gray-400">Long Liqs</p>
-                        <p class="text-2xl font-bold text-green-500" id="eth-longs">0</p>
+                        <p>Long Liqs</p>
+                        <p class="value glitch-number" id="eth-longs">0</p>
                     </div>
                     <div>
-                        <p class="text-gray-400">Short Liqs</p>
-                        <p class="text-2xl font-bold text-red-500" id="eth-shorts">0</p>
+                        <p>Short Liqs</p>
+                        <p class="value glitch-number" id="eth-shorts">0</p>
                     </div>
-                    <div class="col-span-2">
-                        <p class="text-gray-400">Total Value</p>
-                        <p class="text-2xl font-bold" id="eth-total">$0.00</p>
-                    </div>
+                </div>
+                <div class="mt-4">
+                    <p>Total Value</p>
+                    <p class="value glitch-number" id="eth-total">$0.00</p>
                 </div>
             </div>
 
-            <!-- SOL Card -->
-            <div class="bg-gray-800 rounded-lg p-6">
-                <h2 class="text-2xl font-bold mb-4 flex items-center">
-                    <img src="https://cryptologos.cc/logos/solana-sol-logo.png" class="w-8 h-8 mr-2" alt="SOL">
-                    Solana
-                </h2>
+            <!-- Solana Card -->
+            <div class="crypto-card rounded-lg p-6">
+                <div class="flex items-center mb-4">
+                    <span class="crypto-icon">◎</span>
+                    <h2 class="text-xl">Solana</h2>
+                </div>
                 <div class="grid grid-cols-2 gap-4">
                     <div>
-                        <p class="text-gray-400">Long Liqs</p>
-                        <p class="text-2xl font-bold text-green-500" id="sol-longs">0</p>
+                        <p>Long Liqs</p>
+                        <p class="value glitch-number" id="sol-longs">0</p>
                     </div>
                     <div>
-                        <p class="text-gray-400">Short Liqs</p>
-                        <p class="text-2xl font-bold text-red-500" id="sol-shorts">0</p>
+                        <p>Short Liqs</p>
+                        <p class="value glitch-number" id="sol-shorts">0</p>
                     </div>
-                    <div class="col-span-2">
-                        <p class="text-gray-400">Total Value</p>
-                        <p class="text-2xl font-bold" id="sol-total">$0.00</p>
-                    </div>
+                </div>
+                <div class="mt-4">
+                    <p>Total Value</p>
+                    <p class="value glitch-number" id="sol-total">$0.00</p>
                 </div>
             </div>
         </div>
 
-        <!-- Liquidation Log -->
-        <div class="bg-gray-800 rounded-lg p-6">
-            <h2 class="text-2xl font-bold mb-4">Recent Liquidations</h2>
-            <div class="liquidation-log font-mono text-sm" id="liquidation-log">
-                <!-- Liquidation entries will be added here -->
-            </div>
+        <div class="crypto-card rounded-lg p-6">
+            <h2 class="text-xl mb-4">Recent Liquidations</h2>
+            <div class="liquidation-feed" id="liquidation-feed"></div>
         </div>
     </div>
 
     <script>
         const socket = io();
-        const logContainer = document.getElementById('liquidation-log');
+        const feed = document.getElementById('liquidation-feed');
         
         function formatNumber(num) {
             return new Intl.NumberFormat('en-US', {
@@ -112,40 +230,31 @@
             }).format(num);
         }
 
-        function updateStats(stats) {
-            for (const [asset, data] of Object.entries(stats)) {
-                const assetLower = asset.toLowerCase();
-                document.getElementById(`${assetLower}-longs`).textContent = data.longs;
-                document.getElementById(`${assetLower}-shorts`).textContent = data.shorts;
-                document.getElementById(`${assetLower}-total`).textContent = formatNumber(data.total_value);
-            }
-        }
-
-        function addLogEntry(message) {
-            const entry = document.createElement('div');
-            entry.className = 'py-1';
-            
-            if (message.includes('LONG LIQ')) {
-                entry.className += ' long-liq';
-            } else if (message.includes('SHORT LIQ')) {
-                entry.className += ' short-liq';
-            }
-            
-            entry.textContent = message;
-            logContainer.insertBefore(entry, logContainer.firstChild);
-            
-            // Keep only the last 50 entries
-            while (logContainer.children.length > 50) {
-                logContainer.removeChild(logContainer.lastChild);
-            }
-        }
-
         socket.on('stats_update', function(data) {
-            updateStats(data);
+            // Update statistics
+            document.getElementById('btc-longs').textContent = data.BTC.longs;
+            document.getElementById('btc-shorts').textContent = data.BTC.shorts;
+            document.getElementById('btc-total').textContent = formatNumber(data.BTC.total_value);
+            
+            document.getElementById('eth-longs').textContent = data.ETH.longs;
+            document.getElementById('eth-shorts').textContent = data.ETH.shorts;
+            document.getElementById('eth-total').textContent = formatNumber(data.ETH.total_value);
+            
+            document.getElementById('sol-longs').textContent = data.SOL.longs;
+            document.getElementById('sol-shorts').textContent = data.SOL.shorts;
+            document.getElementById('sol-total').textContent = formatNumber(data.SOL.total_value);
         });
 
         socket.on('liquidation', function(data) {
-            addLogEntry(data.message);
+            const div = document.createElement('div');
+            div.className = `terminal-line ${data.side.toLowerCase()}`;
+            div.innerHTML = `${data.symbol} ${data.side} liquidation: ${formatNumber(data.amount)} @ ${data.price}`;
+            feed.insertBefore(div, feed.firstChild);
+            
+            // Keep only last 100 entries
+            if (feed.children.length > 100) {
+                feed.removeChild(feed.lastChild);
+            }
         });
     </script>
 </body>
