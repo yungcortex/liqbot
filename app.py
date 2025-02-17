@@ -26,20 +26,67 @@ latest_stats = {
 def index():
     return render_template('index.html')
 
+@socketio.on('connect')
+def handle_connect():
+    print("Client connected")
+    # Send current stats to newly connected client
+    emit('stats_update', latest_stats)
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    print("Client disconnected")
+
 def emit_update(data, event_type='stats_update'):
     """Emit updates to all connected clients"""
     try:
+        print(f"Emitting {event_type}:", data)
+        if event_type == 'stats_update':
+            # Update our local stats
+            for symbol, values in data.items():
+                if symbol in latest_stats:
+                    latest_stats[symbol].update(values)
         socketio.emit(event_type, data)
     except Exception as e:
         print(f"Error emitting {event_type}: {e}")
 
+def process_liquidation_event(data):
+    """Process a liquidation event and emit it to clients"""
+    try:
+        # Extract relevant information
+        symbol = data.get('symbol', '')
+        side = 'LONG' if data.get('side', '').upper() == 'BUY' else 'SHORT'
+        amount = float(data.get('amount', 0))
+        price = float(data.get('price', 0))
+        
+        # Update stats
+        if symbol in latest_stats:
+            if side == 'LONG':
+                latest_stats[symbol]['longs'] += 1
+            else:
+                latest_stats[symbol]['shorts'] += 1
+            latest_stats[symbol]['total_value'] += amount * price
+        
+        # Emit both the liquidation event and updated stats
+        socketio.emit('liquidation', {
+            'symbol': symbol,
+            'side': side,
+            'amount': amount,
+            'price': price
+        })
+        socketio.emit('stats_update', latest_stats)
+        
+        print(f"Processed liquidation: {symbol} {side} {amount} @ {price}")
+    except Exception as e:
+        print(f"Error processing liquidation: {e}")
+
 async def run_liquidation_bot():
     """Run the liquidation bot and forward updates to web clients"""
     # Set the callback for web updates
-    set_web_update_callback(emit_update)
+    set_web_update_callback(process_liquidation_event)
     
     while True:
         try:
+            print("Connecting to Bybit WebSocket...")
             await connect_websocket()
         except Exception as e:
             print(f"Error in liquidation bot: {e}")
@@ -63,4 +110,4 @@ if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
     
     # Run the Flask application
-    socketio.run(app, host='0.0.0.0', port=port, debug=False, use_reloader=False) 
+    socketio.run(app, host='0.0.0.0', port=port, debug=True, use_reloader=False) 

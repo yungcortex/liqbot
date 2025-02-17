@@ -221,6 +221,29 @@
         const socket = io();
         const feed = document.getElementById('liquidation-feed');
         
+        // Add connection status logging
+        socket.on('connect', () => {
+            console.log('Connected to server');
+            // Add a visual indicator
+            const indicator = document.createElement('div');
+            indicator.className = 'terminal-line';
+            indicator.innerHTML = '🟢 Connected to liquidation feed';
+            feed.insertBefore(indicator, feed.firstChild);
+        });
+
+        socket.on('disconnect', () => {
+            console.log('Disconnected from server');
+            // Add a visual indicator
+            const indicator = document.createElement('div');
+            indicator.className = 'terminal-line';
+            indicator.innerHTML = '🔴 Disconnected from liquidation feed';
+            feed.insertBefore(indicator, feed.firstChild);
+        });
+
+        socket.on('error', (error) => {
+            console.error('Socket error:', error);
+        });
+        
         function formatNumber(num) {
             return new Intl.NumberFormat('en-US', {
                 style: 'currency',
@@ -230,6 +253,11 @@
 
         function updateElementWithGlitch(elementId, newValue) {
             const element = document.getElementById(elementId);
+            if (!element) {
+                console.error(`Element not found: ${elementId}`);
+                return;
+            }
+            console.log(`Updating ${elementId} with value:`, newValue);
             element.classList.add('glitch-animation');
             element.textContent = newValue;
             setTimeout(() => {
@@ -238,6 +266,7 @@
         }
 
         socket.on('stats_update', function(data) {
+            console.log('Received stats update:', data);
             // Update statistics with glitch effect
             updateElementWithGlitch('btc-longs', data.BTC.longs);
             updateElementWithGlitch('btc-shorts', data.BTC.shorts);
@@ -253,6 +282,7 @@
         });
 
         socket.on('liquidation', function(data) {
+            console.log('Received liquidation:', data);
             const div = document.createElement('div');
             div.className = `terminal-line ${data.side.toLowerCase()}`;
             div.innerHTML = `${data.symbol} ${data.side} liquidation: ${formatNumber(data.amount)} @ ${data.price}`;
