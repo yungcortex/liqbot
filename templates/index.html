@@ -218,7 +218,15 @@
     </div>
 
     <script>
-        const socket = io();
+        // Configure Socket.IO to connect to the correct endpoint
+        const socket = io({
+            path: '/socket.io',
+            transports: ['websocket'],
+            reconnection: true,
+            reconnectionAttempts: 5,
+            reconnectionDelay: 1000
+        });
+
         const feed = document.getElementById('liquidation-feed');
         
         // Add connection status logging
@@ -228,6 +236,15 @@
             const indicator = document.createElement('div');
             indicator.className = 'terminal-line';
             indicator.innerHTML = '🟢 Connected to liquidation feed';
+            feed.insertBefore(indicator, feed.firstChild);
+        });
+
+        socket.on('connect_error', (error) => {
+            console.error('Connection error:', error);
+            const indicator = document.createElement('div');
+            indicator.className = 'terminal-line';
+            indicator.style.color = '#ff0000';
+            indicator.innerHTML = `⚠️ Connection error: ${error.message}`;
             feed.insertBefore(indicator, feed.firstChild);
         });
 

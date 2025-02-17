@@ -6,6 +6,11 @@ import json
 from datetime import datetime
 import sys
 import os
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 # Add parent directory to path to import liquidation_bot
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -13,7 +18,15 @@ from liquidation_bot import stats, process_liquidation, connect_websocket, set_w
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your_secret_key_here')
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
+socketio = SocketIO(
+    app,
+    cors_allowed_origins="*",
+    async_mode='eventlet',
+    logger=True,
+    engineio_logger=True,
+    ping_timeout=60,
+    ping_interval=25
+)
 
 # Store the latest statistics
 latest_stats = {
@@ -28,18 +41,18 @@ def index():
 
 @socketio.on('connect')
 def handle_connect():
-    print("Client connected")
+    logger.info("Client connected")
     # Send current stats to newly connected client
     emit('stats_update', latest_stats)
 
 @socketio.on('disconnect')
 def handle_disconnect():
-    print("Client disconnected")
+    logger.info("Client disconnected")
 
 def emit_update(data, event_type='stats_update'):
     """Emit updates to all connected clients"""
     try:
-        print(f"Emitting {event_type}:", data)
+        logger.debug(f"Emitting {event_type}: {data}")
         if event_type == 'stats_update':
             # Update our local stats
             for symbol, values in data.items():
@@ -47,7 +60,7 @@ def emit_update(data, event_type='stats_update'):
                     latest_stats[symbol].update(values)
         socketio.emit(event_type, data)
     except Exception as e:
-        print(f"Error emitting {event_type}: {e}")
+        logger.error(f"Error emitting {event_type}: {e}")
 
 def process_liquidation_event(data):
     """Process a liquidation event and emit it to clients"""
@@ -67,6 +80,8 @@ def process_liquidation_event(data):
             latest_stats[symbol]['total_value'] += amount * price
         
         # Emit both the liquidation event and updated stats
+        logger.info(f"Processing liquidation: {symbol} {side} {amount} @ {price}")
+        
         socketio.emit('liquidation', {
             'symbol': symbol,
             'side': side,
@@ -74,10 +89,8 @@ def process_liquidation_event(data):
             'price': price
         })
         socketio.emit('stats_update', latest_stats)
-        
-        print(f"Processed liquidation: {symbol} {side} {amount} @ {price}")
     except Exception as e:
-        print(f"Error processing liquidation: {e}")
+        logger.error(f"Error processing liquidation: {e}")
 
 async def run_liquidation_bot():
     """Run the liquidation bot and forward updates to web clients"""
@@ -86,10 +99,10 @@ async def run_liquidation_bot():
     
     while True:
         try:
-            print("Connecting to Bybit WebSocket...")
+            logger.info("Connecting to Bybit WebSocket...")
             await connect_websocket()
         except Exception as e:
-            print(f"Error in liquidation bot: {e}")
+            logger.error(f"Error in liquidation bot: {e}")
             await asyncio.sleep(5)
 
 def background_tasks():
@@ -99,7 +112,7 @@ def background_tasks():
     loop.run_until_complete(run_liquidation_bot())
 
 if __name__ == '__main__':
-    print("Starting Liquidation Tracker Web Interface...")
+    logger.info("Starting Liquidation Tracker Web Interface...")
     
     # Start the liquidation bot in a separate thread
     bot_thread = threading.Thread(target=background_tasks)
@@ -110,4 +123,11 @@ if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
     
     # Run the Flask application
-    socketio.run(app, host='0.0.0.0', port=port, debug=True, use_reloader=False) 
+    socketio.run(
+        app,
+        host='0.0.0.0',
+        port=port,
+        debug=True,
+        use_reloader=False,
+        log_output=True
+    ) 
