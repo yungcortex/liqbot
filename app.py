@@ -50,7 +50,7 @@ socketio = SocketIO(
     allow_upgrades=True,
     cookie=None,
     always_connect=True,
-    transports=['websocket', 'polling'],  # Allow both transports temporarily
+    transports=['websocket', 'polling'],
     cors_credentials=False,
     max_queue_size=10
 )

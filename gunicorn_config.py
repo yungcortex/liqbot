@@ -41,7 +41,11 @@ worker_class_args = {
     'websocket_ping_timeout': 120
 }
 
-# Force eventlet worker
+def post_fork(server, worker):
+    """Monkey patch after forking worker processes."""
+    import eventlet
+    eventlet.monkey_patch()
+
 def worker_int(worker):
     """Force eventlet worker."""
     import eventlet
