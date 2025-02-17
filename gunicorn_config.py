@@ -1,5 +1,6 @@
 workers = 1
 worker_class = 'eventlet'
+wsgi_app = 'wsgi:app'
 bind = "0.0.0.0:10000"
 keepalive = 120
 errorlog = '-'
@@ -8,4 +9,5 @@ worker_connections = 1000
 timeout = 300
 forwarded_allow_ips = '*'
 proxy_protocol = True
-proxy_allow_ips = '*' 
+proxy_allow_ips = '*'
+preload_app = True 
