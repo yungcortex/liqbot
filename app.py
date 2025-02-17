@@ -95,6 +95,15 @@ def handle_disconnect():
     except Exception as e:
         logger.error(f"Error in handle_disconnect: {e}")
 
+@socketio.on('heartbeat')
+def handle_heartbeat():
+    """Handle heartbeat messages from clients to keep the connection alive"""
+    try:
+        with app.app_context():
+            emit('heartbeat_response', {'status': 'ok'})
+    except Exception as e:
+        logger.error(f"Error in handle_heartbeat: {e}")
+
 def emit_update(data, event_type='stats_update'):
     """Emit updates to all connected clients"""
     try:

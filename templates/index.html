@@ -220,12 +220,13 @@
     <script>
         // Get the current host from the window location
         const host = window.location.hostname;
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const protocol = window.location.protocol;
         const port = window.location.port ? `:${window.location.port}` : '';
+        const wsProtocol = protocol === 'https:' ? 'wss:' : 'ws:';
         
         // Configure Socket.IO to connect to the correct endpoint
         const socket = io({
-            path: '/socket.io/',  // Make sure to include the trailing slash
+            path: '/socket.io/',
             transports: ['websocket', 'polling'],
             reconnection: true,
             reconnectionAttempts: Infinity,
@@ -234,14 +235,29 @@
             timeout: 20000,
             autoConnect: true,
             forceNew: true,
+            upgrade: true,
+            rememberUpgrade: true,
+            secure: protocol === 'https:',
+            rejectUnauthorized: false,
             // Explicitly set the Socket.IO URL to match the current host
-            url: `${window.location.protocol}//${host}${port}`,
-            withCredentials: false,  // Changed to false for Render
+            url: `${protocol}//${host}${port}`,
             extraHeaders: {
                 "Proxy-Connection": "Upgrade",
-                "Connection": "upgrade"
+                "Connection": "upgrade",
+                "Upgrade": "websocket"
             }
         });
+
+        // Create a heartbeat mechanism
+        let heartbeatInterval;
+        function startHeartbeat() {
+            clearInterval(heartbeatInterval);
+            heartbeatInterval = setInterval(() => {
+                if (socket.connected) {
+                    socket.emit('heartbeat');
+                }
+            }, 25000); // Send heartbeat every 25 seconds
+        }
 
         const feed = document.getElementById('liquidation-feed');
         let reconnectAttempts = 0;
@@ -251,6 +267,8 @@
         socket.on('connect', () => {
             console.log('Connected to server via ' + socket.io.engine.transport.name);
             reconnectAttempts = 0;  // Reset counter on successful connection
+            startHeartbeat();  // Start the heartbeat
+            
             // Add a visual indicator
             const indicator = document.createElement('div');
             indicator.className = 'terminal-line';
@@ -262,6 +280,7 @@
         socket.on('connect_error', (error) => {
             console.error('Connection error:', error);
             reconnectAttempts++;
+            clearInterval(heartbeatInterval);  // Clear heartbeat on connection error
             
             const indicator = document.createElement('div');
             indicator.className = 'terminal-line';
@@ -303,16 +322,34 @@
                 transportIndicator.innerHTML = '⚠️ Switching back to WebSocket transport...';
                 feed.insertBefore(transportIndicator, feed.firstChild);
             }
+
+            // Force reconnect after 10 seconds if still disconnected
+            setTimeout(() => {
+                if (!socket.connected) {
+                    console.log('Forcing reconnection...');
+                    socket.connect();
+                }
+            }, 10000);
         });
 
         socket.on('disconnect', () => {
             console.log('Disconnected from server');
+            clearInterval(heartbeatInterval);  // Clear heartbeat on disconnect
+            
             // Add a visual indicator
             const indicator = document.createElement('div');
             indicator.className = 'terminal-line';
             indicator.style.color = '#ff0000';
             indicator.innerHTML = '🔴 Disconnected from liquidation feed - Attempting to reconnect...';
             feed.insertBefore(indicator, feed.firstChild);
+
+            // Force reconnect after 5 seconds
+            setTimeout(() => {
+                if (!socket.connected) {
+                    console.log('Forcing reconnection after disconnect...');
+                    socket.connect();
+                }
+            }, 5000);
         });
 
         socket.on('error', (error) => {
