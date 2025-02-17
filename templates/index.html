@@ -115,12 +115,6 @@
             margin-right: 0.5rem;
         }
 
-        /* Glitch effect for numbers */
-        .glitch-number {
-            position: relative;
-            animation: glitch 0.5s infinite;
-        }
-
         @keyframes glitch {
             0% { transform: translate(0); }
             20% { transform: translate(-2px, 2px); }
@@ -128,6 +122,10 @@
             60% { transform: translate(2px, 2px); }
             80% { transform: translate(2px, -2px); }
             100% { transform: translate(0); }
+        }
+
+        .glitch-animation {
+            animation: glitch 0.2s ease-in-out;
         }
 
         .terminal-line {
@@ -155,16 +153,16 @@
                 <div class="grid grid-cols-2 gap-4">
                     <div>
                         <p>Long Liqs</p>
-                        <p class="value glitch-number" id="btc-longs">0</p>
+                        <p class="value" id="btc-longs">0</p>
                     </div>
                     <div>
                         <p>Short Liqs</p>
-                        <p class="value glitch-number" id="btc-shorts">0</p>
+                        <p class="value" id="btc-shorts">0</p>
                     </div>
                 </div>
                 <div class="mt-4">
                     <p>Total Value</p>
-                    <p class="value glitch-number" id="btc-total">$0.00</p>
+                    <p class="value" id="btc-total">$0.00</p>
                 </div>
             </div>
 
@@ -177,16 +175,16 @@
                 <div class="grid grid-cols-2 gap-4">
                     <div>
                         <p>Long Liqs</p>
-                        <p class="value glitch-number" id="eth-longs">0</p>
+                        <p class="value" id="eth-longs">0</p>
                     </div>
                     <div>
                         <p>Short Liqs</p>
-                        <p class="value glitch-number" id="eth-shorts">0</p>
+                        <p class="value" id="eth-shorts">0</p>
                     </div>
                 </div>
                 <div class="mt-4">
                     <p>Total Value</p>
-                    <p class="value glitch-number" id="eth-total">$0.00</p>
+                    <p class="value" id="eth-total">$0.00</p>
                 </div>
             </div>
 
@@ -199,16 +197,16 @@
                 <div class="grid grid-cols-2 gap-4">
                     <div>
                         <p>Long Liqs</p>
-                        <p class="value glitch-number" id="sol-longs">0</p>
+                        <p class="value" id="sol-longs">0</p>
                     </div>
                     <div>
                         <p>Short Liqs</p>
-                        <p class="value glitch-number" id="sol-shorts">0</p>
+                        <p class="value" id="sol-shorts">0</p>
                     </div>
                 </div>
                 <div class="mt-4">
                     <p>Total Value</p>
-                    <p class="value glitch-number" id="sol-total">$0.00</p>
+                    <p class="value" id="sol-total">$0.00</p>
                 </div>
             </div>
         </div>
@@ -230,19 +228,28 @@
             }).format(num);
         }
 
+        function updateElementWithGlitch(elementId, newValue) {
+            const element = document.getElementById(elementId);
+            element.classList.add('glitch-animation');
+            element.textContent = newValue;
+            setTimeout(() => {
+                element.classList.remove('glitch-animation');
+            }, 200);
+        }
+
         socket.on('stats_update', function(data) {
-            // Update statistics
-            document.getElementById('btc-longs').textContent = data.BTC.longs;
-            document.getElementById('btc-shorts').textContent = data.BTC.shorts;
-            document.getElementById('btc-total').textContent = formatNumber(data.BTC.total_value);
+            // Update statistics with glitch effect
+            updateElementWithGlitch('btc-longs', data.BTC.longs);
+            updateElementWithGlitch('btc-shorts', data.BTC.shorts);
+            updateElementWithGlitch('btc-total', formatNumber(data.BTC.total_value));
             
-            document.getElementById('eth-longs').textContent = data.ETH.longs;
-            document.getElementById('eth-shorts').textContent = data.ETH.shorts;
-            document.getElementById('eth-total').textContent = formatNumber(data.ETH.total_value);
+            updateElementWithGlitch('eth-longs', data.ETH.longs);
+            updateElementWithGlitch('eth-shorts', data.ETH.shorts);
+            updateElementWithGlitch('eth-total', formatNumber(data.ETH.total_value));
             
-            document.getElementById('sol-longs').textContent = data.SOL.longs;
-            document.getElementById('sol-shorts').textContent = data.SOL.shorts;
-            document.getElementById('sol-total').textContent = formatNumber(data.SOL.total_value);
+            updateElementWithGlitch('sol-longs', data.SOL.longs);
+            updateElementWithGlitch('sol-shorts', data.SOL.shorts);
+            updateElementWithGlitch('sol-total', formatNumber(data.SOL.total_value));
         });
 
         socket.on('liquidation', function(data) {
