@@ -10,7 +10,7 @@ bot_thread.daemon = True
 bot_thread.start()
 
 # Create the WSGI application with Socket.IO integration
-application = socketio.middleware(app)
+application = socketio.wsgi_app(app)
 
 # For local development
 if __name__ == '__main__':
