@@ -7,10 +7,17 @@ from datetime import datetime
 import sys
 import os
 import logging
+import eventlet
 
 # Configure logging
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
+
+# Patch eventlet for better async handling
+eventlet.monkey_patch()
 
 # Add parent directory to path to import liquidation_bot
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -25,7 +32,13 @@ socketio = SocketIO(
     logger=True,
     engineio_logger=True,
     ping_timeout=60,
-    ping_interval=25
+    ping_interval=25,
+    max_http_buffer_size=1e8,
+    async_handlers=True,
+    reconnection=True,
+    reconnection_attempts=5,
+    reconnection_delay=1000,
+    reconnection_delay_max=5000
 )
 
 # Store the latest statistics
@@ -41,13 +54,19 @@ def index():
 
 @socketio.on('connect')
 def handle_connect():
-    logger.info("Client connected")
-    # Send current stats to newly connected client
-    emit('stats_update', latest_stats)
+    try:
+        logger.info("Client connected")
+        # Send current stats to newly connected client
+        emit('stats_update', latest_stats)
+    except Exception as e:
+        logger.error(f"Error in handle_connect: {e}")
 
 @socketio.on('disconnect')
 def handle_disconnect():
-    logger.info("Client disconnected")
+    try:
+        logger.info("Client disconnected")
+    except Exception as e:
+        logger.error(f"Error in handle_disconnect: {e}")
 
 def emit_update(data, event_type='stats_update'):
     """Emit updates to all connected clients"""
