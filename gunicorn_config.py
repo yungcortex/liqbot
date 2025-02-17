@@ -39,4 +39,11 @@ worker_class_args = {
     'websocket_max_message_size': 0,
     'websocket_ping_interval': 25,
     'websocket_ping_timeout': 120
-} 
+}
+
+# Force eventlet worker
+def worker_int(worker):
+    """Force eventlet worker."""
+    import eventlet
+    eventlet.monkey_patch()
+    return eventlet.listen(('0.0.0.0', 10000)) 

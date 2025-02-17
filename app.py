@@ -50,17 +50,9 @@ socketio = SocketIO(
     allow_upgrades=True,
     cookie=None,
     always_connect=True,
-    transports=['websocket'],  # Only use WebSocket transport
+    transports=['websocket', 'polling'],  # Allow both transports temporarily
     cors_credentials=False,
-    max_queue_size=10,
-    message_queue=None,
-    channel='socketio',
-    write_only=False,
-    json=None,
-    async_handlers_pool_size=100,
-    client_manager_ping_timeout=120,
-    client_manager_ping_interval=25,
-    client_manager_ping_max_missed=3
+    max_queue_size=10
 )
 
 # Add parent directory to path to import liquidation_bot
