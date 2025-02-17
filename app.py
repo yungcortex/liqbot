@@ -12,8 +12,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from liquidation_bot import stats, process_liquidation, connect_websocket, set_web_update_callback
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'your_secret_key_here'
-socketio = SocketIO(app, cors_allowed_origins="*")
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your_secret_key_here')
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
 # Store the latest statistics
 latest_stats = {
@@ -53,12 +53,14 @@ def background_tasks():
 
 if __name__ == '__main__':
     print("Starting Liquidation Tracker Web Interface...")
-    print("Visit http://localhost:8080 in your browser")
     
     # Start the liquidation bot in a separate thread
     bot_thread = threading.Thread(target=background_tasks)
     bot_thread.daemon = True
     bot_thread.start()
     
+    # Get port from environment variable (Render sets this)
+    port = int(os.environ.get('PORT', 10000))
+    
     # Run the Flask application
-    socketio.run(app, debug=True, use_reloader=False, port=8080) 
+    socketio.run(app, host='0.0.0.0', port=port, debug=False, use_reloader=False) 
