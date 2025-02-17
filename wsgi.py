@@ -9,8 +9,8 @@ bot_thread = threading.Thread(target=background_tasks)
 bot_thread.daemon = True
 bot_thread.start()
 
-# Create the WSGI application
-application = app.wsgi_app
+# Create the WSGI application with Socket.IO integration
+application = socketio.middleware(app)
 
 # For local development
 if __name__ == '__main__':
