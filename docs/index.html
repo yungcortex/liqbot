@@ -6,17 +6,143 @@
     <title>Crypto Liquidation Tracker</title>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=VT323&display=swap');
+        
+        body {
+            background-color: #000;
+            color: #00ff00;
+            font-family: 'VT323', monospace;
+            text-shadow: 0 0 5px #00ff00;
+            position: relative;
+            overflow-x: hidden;
+        }
+
+        body::before {
+            content: "";
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: repeating-linear-gradient(
+                0deg,
+                rgba(0, 0, 0, 0.15),
+                rgba(0, 0, 0, 0.15) 1px,
+                transparent 1px,
+                transparent 2px
+            );
+            pointer-events: none;
+            z-index: 1000;
+            animation: scan 10s linear infinite;
+        }
+
+        @keyframes scan {
+            from {
+                transform: translateY(0);
+            }
+            to {
+                transform: translateY(100px);
+            }
+        }
+
+        .container {
+            position: relative;
+            z-index: 1;
+        }
+
+        .bg-gray-800 {
+            background-color: rgba(0, 20, 0, 0.7);
+            border: 1px solid #00ff00;
+            box-shadow: 0 0 10px rgba(0, 255, 0, 0.2);
+        }
+
+        .bg-gray-700 {
+            background-color: rgba(0, 10, 0, 0.9);
+        }
+
+        h1, h2 {
+            color: #00ff00;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        .text-gray-400 {
+            color: #00cc00;
+        }
+
+        code {
+            font-family: 'VT323', monospace;
+            border-left: 2px solid #00ff00;
+            padding-left: 1rem;
+        }
+
+        .bg-blue-600 {
+            background-color: #003300;
+            border: 1px solid #00ff00;
+        }
+
+        .bg-blue-600:hover {
+            background-color: #004400;
+            box-shadow: 0 0 15px rgba(0, 255, 0, 0.4);
+        }
+
+        /* Terminal effect */
+        .terminal-cursor::after {
+            content: "_";
+            animation: blink 1s step-end infinite;
+        }
+
+        @keyframes blink {
+            50% { opacity: 0; }
+        }
+
+        /* Glitch effect */
+        h1 {
+            position: relative;
+        }
+
+        h1::before, h1::after {
+            content: "Crypto Liquidation Tracker 🔥";
+            position: absolute;
+            width: 100%;
+            left: 0;
+        }
+
+        h1::before {
+            clip-path: polygon(0 0, 100% 0, 100% 45%, 0 45%);
+            transform: translate(-2px, -2px);
+            opacity: 0.7;
+            animation: glitch 2s infinite;
+        }
+
+        h1::after {
+            clip-path: polygon(0 80%, 100% 20%, 100% 100%, 0 100%);
+            transform: translate(2px, 2px);
+            opacity: 0.7;
+            animation: glitch 2s infinite reverse;
+        }
+
+        @keyframes glitch {
+            0% { transform: translate(0); }
+            20% { transform: translate(-2px, 2px); }
+            40% { transform: translate(-2px, -2px); }
+            60% { transform: translate(2px, 2px); }
+            80% { transform: translate(2px, -2px); }
+            100% { transform: translate(0); }
+        }
+    </style>
 </head>
-<body class="bg-gray-900 text-white">
+<body class="min-h-screen">
     <div class="container mx-auto px-4 py-8">
         <header class="text-center mb-12">
-            <h1 class="text-4xl font-bold mb-4">Crypto Liquidation Tracker 🔥</h1>
-            <p class="text-xl text-gray-400">Real-time cryptocurrency liquidation tracking for Bybit</p>
+            <h1 class="text-4xl font-bold mb-4 terminal-cursor">Crypto Liquidation Tracker 🔥</h1>
+            <p class="text-xl">Real-time cryptocurrency liquidation tracking for Bybit</p>
         </header>
 
         <div class="grid md:grid-cols-2 gap-8 mb-12">
-            <div class="bg-gray-800 p-6 rounded-lg">
-                <h2 class="text-2xl font-bold mb-4">Features</h2>
+            <div class="bg-gray-800 p-6 rounded-lg backdrop-blur">
+                <h2 class="text-2xl font-bold mb-4 terminal-cursor">Features</h2>
                 <ul class="space-y-2">
                     <li><i class="fas fa-chart-line mr-2"></i>Real-time liquidation tracking (BTC, ETH, SOL)</li>
                     <li><i class="fas fa-desktop mr-2"></i>Terminal & Web interfaces</li>
@@ -24,8 +150,8 @@
                     <li><i class="fas fa-chart-bar mr-2"></i>Live statistics dashboard</li>
                 </ul>
             </div>
-            <div class="bg-gray-800 p-6 rounded-lg">
-                <h2 class="text-2xl font-bold mb-4">Quick Start</h2>
+            <div class="bg-gray-800 p-6 rounded-lg backdrop-blur">
+                <h2 class="text-2xl font-bold mb-4 terminal-cursor">Quick Start</h2>
                 <div class="bg-gray-700 p-4 rounded">
                     <code class="text-green-400">
                         git clone https://github.com/yungcortex/liqbot.git<br>
@@ -39,13 +165,13 @@
         </div>
 
         <div class="grid md:grid-cols-2 gap-8 mb-12">
-            <div class="bg-gray-800 p-6 rounded-lg">
-                <h2 class="text-2xl font-bold mb-4">Terminal Interface</h2>
+            <div class="bg-gray-800 p-6 rounded-lg backdrop-blur">
+                <h2 class="text-2xl font-bold mb-4 terminal-cursor">Terminal Interface</h2>
                 <img src="images/terminal.png" alt="Terminal Interface" class="rounded-lg shadow-lg mb-4">
                 <p class="text-gray-400">Classic terminal interface with Rich text formatting and real-time updates.</p>
             </div>
-            <div class="bg-gray-800 p-6 rounded-lg">
-                <h2 class="text-2xl font-bold mb-4">Web Interface</h2>
+            <div class="bg-gray-800 p-6 rounded-lg backdrop-blur">
+                <h2 class="text-2xl font-bold mb-4 terminal-cursor">Web Interface</h2>
                 <img src="images/web.png" alt="Web Interface" class="rounded-lg shadow-lg mb-4">
                 <p class="text-gray-400">Modern web interface with real-time WebSocket updates and responsive design.</p>
             </div>
