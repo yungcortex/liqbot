@@ -1,12 +1,15 @@
 # Crypto Liquidation Tracker
 
-A real-time terminal-based tracker for cryptocurrency liquidations on Bybit. Monitors BTC, ETH, and SOL liquidations with color-coded notifications for long and short positions.
+A real-time cryptocurrency liquidation tracker for Bybit. Monitor BTC, ETH, and SOL liquidations with both terminal and web interfaces. Features color-coded notifications for long and short positions.
 
 ## Features
 
 - Real-time liquidation tracking for BTC, ETH, and SOL
+- Two interfaces:
+  - Terminal-based interface with Rich text formatting
+  - Modern web interface with real-time updates
 - Color-coded output (green for long liquidations, red for short liquidations)
-- Live statistics table showing:
+- Live statistics showing:
   - Number of long liquidations
   - Number of short liquidations
   - Total liquidation value in USD
@@ -15,53 +18,95 @@ A real-time terminal-based tracker for cryptocurrency liquidations on Bybit. Mon
 ## Setup
 
 1. Make sure you have Python 3.7+ installed
-2. Download or clone this repository to your computer
-3. Install the required packages:
+2. Download or clone this repository:
+```bash
+git clone https://github.com/yungcortex/liquitation_bot.git
+cd liquitation_bot
+```
+
+3. Create and activate a virtual environment:
+
+### For Windows:
+```bash
+python -m venv .venv
+.venv\Scripts\activate
+```
+
+### For Mac/Linux:
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+4. Install the required packages:
 ```bash
 pip install -r requirements.txt
 ```
 
 ## Running the Bot
 
-There are two ways to run the bot:
+You can run the bot in either terminal mode or web interface mode:
 
-### Method 1: From the project directory (Recommended)
-1. Open your terminal
-2. Navigate to where you downloaded the project:
+### Terminal Interface
+
+1. Navigate to the project directory:
 ```bash
 cd "path/to/liquidation-bot"
 ```
-3. Run the bot:
+2. Activate the virtual environment (if not already activated):
+   - Windows: `.venv\Scripts\activate`
+   - Mac/Linux: `source .venv/bin/activate`
+3. Run the terminal interface:
 ```bash
 python liquidation_bot.py
 ```
 
-### Method 2: From any location
-You can run the bot from any directory by providing the full path to the script:
+### Web Interface
+
+1. Navigate to the project directory:
 ```bash
-python "path/to/liquidation-bot/liquidation_bot.py"
+cd "path/to/liquidation-bot"
 ```
+2. Activate the virtual environment (if not already activated):
+   - Windows: `.venv\Scripts\activate`
+   - Mac/Linux: `source .venv/bin/activate`
+3. Start the web server:
+```bash
+cd web
+python app.py
+```
+4. Open your browser and visit: `http://localhost:5000`
 
-Replace `path/to/liquidation-bot` with the actual path where you downloaded the project.
-
-For example:
-- Windows: `python "C:\Users\YourUsername\Downloads\liquidation-bot\liquidation_bot.py"`
-- Mac/Linux: `python "/Users/YourUsername/Downloads/liquidation-bot/liquidation_bot.py"`
+The web interface features:
+- Modern, dark-themed UI
+- Real-time updates via WebSocket
+- Responsive design for mobile and desktop
+- Cryptocurrency logos and card-based layout
+- Color-coded liquidation feed
 
 ## Understanding the Output
 
 - 🟢 Green messages indicate long position liquidations
 - 🔴 Red messages indicate short position liquidations
-- The table shows running totals for each type of liquidation
+- The statistics show running totals for each type of liquidation
 - All values are displayed in USD
 - Blue messages show raw WebSocket data (for debugging)
 - Cyan messages show connection status and successful processing
 
 ## Troubleshooting
 
-If you get module errors, ensure all dependencies are installed:
+If you get module errors, make sure you:
+1. Have activated the virtual environment (you should see `(.venv)` in your terminal prompt)
+2. Have installed all dependencies:
 ```bash
-pip install websockets==12.0 python-dotenv==1.0.0 rich==13.7.0
+pip install websockets==12.0 python-dotenv==1.0.0 rich==13.7.0 flask==3.0.2 flask-socketio==5.3.6
 ```
 
-Press Ctrl+C to exit the program. 
+To deactivate the virtual environment when you're done, simply type:
+```bash
+deactivate
+```
+
+## Contributing
+
+Feel free to submit issues and enhancement requests! 

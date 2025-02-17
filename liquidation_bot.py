@@ -22,6 +22,13 @@ stats = {
 # Keep a log of recent liquidations (last 50 entries)
 liquidation_log = deque(maxlen=50)
 
+# Callback for web updates (will be set by web app)
+web_update_callback = None
+
+def set_web_update_callback(callback):
+    global web_update_callback
+    web_update_callback = callback
+
 def generate_table():
     """Generate a rich table with current statistics"""
     table = Table(title="Liquidation Tracker")
@@ -109,6 +116,13 @@ def process_liquidation(message):
                 # Update the live display
                 if "live" in globals():
                     live.update(make_layout())
+                
+                # Send update to web interface if callback is set
+                if web_update_callback:
+                    web_update_callback(stats)
+                    web_update_callback({
+                        "message": f"{update_time} 🔥 {'LONG' if side == 'Buy' else 'SHORT'} LIQ {base_asset}: ${value:,.2f} @ ${price:,.2f}"
+                    }, event_type='liquidation')
 
     except Exception as e:
         error_log = f"[yellow]{datetime.now().strftime('%H:%M:%S')} Error processing message: {str(e)}[/yellow]"

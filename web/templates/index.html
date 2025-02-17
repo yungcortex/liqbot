@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crypto Liquidation Tracker</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <style>
+        .liquidation-log {
+            height: 400px;
+            overflow-y: auto;
+        }
+        .long-liq {
+            color: #10B981;
+        }
+        .short-liq {
+            color: #EF4444;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+    <div class="container mx-auto px-4 py-8">
+        <h1 class="text-4xl font-bold mb-8 text-center">Crypto Liquidation Tracker</h1>
+        
+        <!-- Stats Grid -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <!-- BTC Card -->
+            <div class="bg-gray-800 rounded-lg p-6">
+                <h2 class="text-2xl font-bold mb-4 flex items-center">
+                    <img src="https://cryptologos.cc/logos/bitcoin-btc-logo.png" class="w-8 h-8 mr-2" alt="BTC">
+                    Bitcoin
+                </h2>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <p class="text-gray-400">Long Liqs</p>
+                        <p class="text-2xl font-bold text-green-500" id="btc-longs">0</p>
+                    </div>
+                    <div>
+                        <p class="text-gray-400">Short Liqs</p>
+                        <p class="text-2xl font-bold text-red-500" id="btc-shorts">0</p>
+                    </div>
+                    <div class="col-span-2">
+                        <p class="text-gray-400">Total Value</p>
+                        <p class="text-2xl font-bold" id="btc-total">$0.00</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ETH Card -->
+            <div class="bg-gray-800 rounded-lg p-6">
+                <h2 class="text-2xl font-bold mb-4 flex items-center">
+                    <img src="https://cryptologos.cc/logos/ethereum-eth-logo.png" class="w-8 h-8 mr-2" alt="ETH">
+                    Ethereum
+                </h2>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <p class="text-gray-400">Long Liqs</p>
+                        <p class="text-2xl font-bold text-green-500" id="eth-longs">0</p>
+                    </div>
+                    <div>
+                        <p class="text-gray-400">Short Liqs</p>
+                        <p class="text-2xl font-bold text-red-500" id="eth-shorts">0</p>
+                    </div>
+                    <div class="col-span-2">
+                        <p class="text-gray-400">Total Value</p>
+                        <p class="text-2xl font-bold" id="eth-total">$0.00</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SOL Card -->
+            <div class="bg-gray-800 rounded-lg p-6">
+                <h2 class="text-2xl font-bold mb-4 flex items-center">
+                    <img src="https://cryptologos.cc/logos/solana-sol-logo.png" class="w-8 h-8 mr-2" alt="SOL">
+                    Solana
+                </h2>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <p class="text-gray-400">Long Liqs</p>
+                        <p class="text-2xl font-bold text-green-500" id="sol-longs">0</p>
+                    </div>
+                    <div>
+                        <p class="text-gray-400">Short Liqs</p>
+                        <p class="text-2xl font-bold text-red-500" id="sol-shorts">0</p>
+                    </div>
+                    <div class="col-span-2">
+                        <p class="text-gray-400">Total Value</p>
+                        <p class="text-2xl font-bold" id="sol-total">$0.00</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Liquidation Log -->
+        <div class="bg-gray-800 rounded-lg p-6">
+            <h2 class="text-2xl font-bold mb-4">Recent Liquidations</h2>
+            <div class="liquidation-log font-mono text-sm" id="liquidation-log">
+                <!-- Liquidation entries will be added here -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        const logContainer = document.getElementById('liquidation-log');
+        
+        function formatNumber(num) {
+            return new Intl.NumberFormat('en-US', {
+                style: 'currency',
+                currency: 'USD'
+            }).format(num);
+        }
+
+        function updateStats(stats) {
+            for (const [asset, data] of Object.entries(stats)) {
+                const assetLower = asset.toLowerCase();
+                document.getElementById(`${assetLower}-longs`).textContent = data.longs;
+                document.getElementById(`${assetLower}-shorts`).textContent = data.shorts;
+                document.getElementById(`${assetLower}-total`).textContent = formatNumber(data.total_value);
+            }
+        }
+
+        function addLogEntry(message) {
+            const entry = document.createElement('div');
+            entry.className = 'py-1';
+            
+            if (message.includes('LONG LIQ')) {
+                entry.className += ' long-liq';
+            } else if (message.includes('SHORT LIQ')) {
+                entry.className += ' short-liq';
+            }
+            
+            entry.textContent = message;
+            logContainer.insertBefore(entry, logContainer.firstChild);
+            
+            // Keep only the last 50 entries
+            while (logContainer.children.length > 50) {
+                logContainer.removeChild(logContainer.lastChild);
+            }
+        }
+
+        socket.on('stats_update', function(data) {
+            updateStats(data);
+        });
+
+        socket.on('liquidation', function(data) {
+            addLogEntry(data.message);
+        });
+    </script>
+</body>
+</html> 
