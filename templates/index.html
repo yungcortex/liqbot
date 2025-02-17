@@ -221,22 +221,17 @@
         // Configure Socket.IO to connect to the correct endpoint
         const socket = io({
             path: '/socket.io/',
-            transports: ['websocket', 'polling'],  // Try both transports
+            transports: ['polling', 'websocket'],  // Start with polling, then upgrade to websocket
             reconnection: true,
             reconnectionAttempts: Infinity,
             reconnectionDelay: 1000,
             reconnectionDelayMax: 5000,
-            timeout: 20000,
+            timeout: 120000,  // Match server timeout
             autoConnect: true,
-            forceNew: true,
-            secure: true,
+            forceNew: false,  // Don't force new connection
+            secure: window.location.protocol === 'https:',
             rejectUnauthorized: false,
-            withCredentials: false,
-            upgrade: true,
-            rememberUpgrade: true,
-            extraHeaders: {
-                'X-Forwarded-Proto': window.location.protocol.slice(0, -1)
-            }
+            withCredentials: false
         });
 
         // Create a heartbeat mechanism with more frequent checks
@@ -269,16 +264,9 @@
         
         // Add connection status logging
         socket.on('connect', () => {
-            console.log('Connected to server via ' + socket.io.engine.transport.name);
-            reconnectAttempts = 0;  // Reset counter on successful connection
-            startHeartbeat();  // Start the heartbeat
-            
-            // Add a visual indicator
-            const indicator = document.createElement('div');
-            indicator.className = 'terminal-line';
-            indicator.style.color = '#00ff00';
-            indicator.innerHTML = `🟢 Connected to liquidation feed via ${socket.io.engine.transport.name}`;
-            feed.insertBefore(indicator, feed.firstChild);
+            console.log('Connected to server');
+            document.getElementById('liquidation-feed').innerHTML = '<div class="terminal-line">Connected to liquidation feed via websocket</div>';
+            socket.emit('get_stats');  // Request initial stats
         });
 
         socket.on('connect_error', (error) => {
@@ -293,22 +281,7 @@
 
         socket.on('disconnect', () => {
             console.log('Disconnected from server');
-            clearInterval(heartbeatInterval);  // Clear heartbeat on disconnect
-            
-            // Add a visual indicator
-            const indicator = document.createElement('div');
-            indicator.className = 'terminal-line';
-            indicator.style.color = '#ff0000';
-            indicator.innerHTML = '🔴 Disconnected from liquidation feed - Attempting to reconnect...';
-            feed.insertBefore(indicator, feed.firstChild);
-
-            // Force reconnect after 5 seconds
-            setTimeout(() => {
-                if (!socket.connected) {
-                    console.log('Forcing reconnection after disconnect...');
-                    socket.connect();
-                }
-            }, 5000);
+            document.getElementById('liquidation-feed').innerHTML += '<div class="terminal-line">Disconnected from server. Attempting to reconnect...</div>';
         });
 
         socket.on('error', (error) => {
@@ -367,55 +340,35 @@
             }, 200);
         }
 
-        socket.on('stats_update', function(data) {
-            console.log('Received stats update:', JSON.stringify(data, null, 2));
-            try {
-                // Update Bitcoin stats
-                if (data.BTC) {
-                    console.log('Updating BTC stats:', data.BTC);
-                    updateElementWithGlitch('btc-longs', data.BTC.longs);
-                    updateElementWithGlitch('btc-shorts', data.BTC.shorts);
-                    updateElementWithGlitch('btc-total', formatNumber(data.BTC.total_value));
-                }
-                
-                // Update Ethereum stats
-                if (data.ETH) {
-                    console.log('Updating ETH stats:', data.ETH);
-                    updateElementWithGlitch('eth-longs', data.ETH.longs);
-                    updateElementWithGlitch('eth-shorts', data.ETH.shorts);
-                    updateElementWithGlitch('eth-total', formatNumber(data.ETH.total_value));
-                }
-                
-                // Update Solana stats
-                if (data.SOL) {
-                    console.log('Updating SOL stats:', data.SOL);
-                    updateElementWithGlitch('sol-longs', data.SOL.longs);
-                    updateElementWithGlitch('sol-shorts', data.SOL.shorts);
-                    updateElementWithGlitch('sol-total', formatNumber(data.SOL.total_value));
-                }
-            } catch (error) {
-                console.error('Error updating stats:', error, 'Data:', data);
+        socket.on('stats_update', (data) => {
+            console.log('Stats update:', data);
+            for (const [symbol, stats] of Object.entries(data)) {
+                const lower = symbol.toLowerCase();
+                document.getElementById(`${lower}-longs`).textContent = stats.longs;
+                document.getElementById(`${lower}-shorts`).textContent = stats.shorts;
+                document.getElementById(`${lower}-total`).textContent = `$${stats.total_value.toFixed(2)}`;
             }
         });
 
-        socket.on('liquidation', function(data) {
-            console.log('Received liquidation:', JSON.stringify(data, null, 2));
-            try {
-                const div = document.createElement('div');
-                div.className = `terminal-line ${data.side.toLowerCase()}`;
-                const formattedAmount = formatNumber(data.amount);
-                const formattedValue = formatNumber(data.value);
-                div.innerHTML = `${data.symbol} ${data.side} liquidation: ${formattedAmount} @ ${data.price} (${formattedValue})`;
-                feed.insertBefore(div, feed.firstChild);
-                
-                // Keep only last 100 entries
-                if (feed.children.length > 100) {
-                    feed.removeChild(feed.lastChild);
-                }
-            } catch (error) {
-                console.error('Error displaying liquidation:', error, 'Data:', data);
-            }
+        socket.on('liquidation', (data) => {
+            console.log('Liquidation event:', data);
+            const feed = document.getElementById('liquidation-feed');
+            const direction = data.side === 'LONG' ? 'long' : 'short';
+            const line = `
+                <div class="terminal-line glitch-animation">
+                    <span class="${direction}">${data.symbol} ${data.side}</span>
+                    ${data.amount.toFixed(3)} @ $${data.price.toFixed(2)}
+                    = $${data.value.toFixed(2)}
+                </div>
+            `;
+            feed.innerHTML = line + feed.innerHTML;
         });
+
+        socket.on('heartbeat_response', () => {
+            missedHeartbeats = 0;
+        });
+
+        startHeartbeat();
     </script>
 </body>
 </html> 
