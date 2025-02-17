@@ -34,7 +34,7 @@ app.config['PROPAGATE_EXCEPTIONS'] = True
 # Initialize CORS with simpler configuration
 CORS(app, resources={r"/*": {"origins": "*"}})
 
-# Initialize SocketIO
+# Initialize SocketIO with production-ready settings
 socketio = SocketIO(
     app,
     cors_allowed_origins="*",
@@ -53,7 +53,12 @@ socketio = SocketIO(
     always_connect=True,
     transports=['websocket', 'polling'],
     cors_credentials=False,
-    max_queue_size=10
+    max_queue_size=10,
+    message_queue=None,
+    channel='socketio',
+    write_only=False,
+    json=None,
+    async_handlers_pool_size=100
 )
 
 # Add parent directory to path to import liquidation_bot

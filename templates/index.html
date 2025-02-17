@@ -221,7 +221,7 @@
         // Configure Socket.IO to connect to the correct endpoint
         const socket = io({
             path: '/socket.io/',
-            transports: ['websocket'],  // Try WebSocket first
+            transports: ['websocket', 'polling'],  // Try both transports
             reconnection: true,
             reconnectionAttempts: Infinity,
             reconnectionDelay: 1000,
@@ -229,22 +229,39 @@
             timeout: 20000,
             autoConnect: true,
             forceNew: true,
-            secure: window.location.protocol === 'https:',
+            secure: true,
             rejectUnauthorized: false,
             withCredentials: false,
             upgrade: true,
-            rememberUpgrade: true
+            rememberUpgrade: true,
+            extraHeaders: {
+                'X-Forwarded-Proto': window.location.protocol.slice(0, -1)
+            }
         });
 
-        // Create a heartbeat mechanism
+        // Create a heartbeat mechanism with more frequent checks
         let heartbeatInterval;
+        let missedHeartbeats = 0;
+        const MAX_MISSED_HEARTBEATS = 3;
+
         function startHeartbeat() {
             clearInterval(heartbeatInterval);
+            missedHeartbeats = 0;
+            
             heartbeatInterval = setInterval(() => {
                 if (socket.connected) {
-                    socket.emit('heartbeat');
+                    missedHeartbeats++;
+                    socket.emit('heartbeat', () => {
+                        missedHeartbeats--;
+                    });
+                    
+                    if (missedHeartbeats >= MAX_MISSED_HEARTBEATS) {
+                        console.log('Too many missed heartbeats, reconnecting...');
+                        socket.disconnect();
+                        socket.connect();
+                    }
                 }
-            }, 25000); // Send heartbeat every 25 seconds
+            }, 15000); // Send heartbeat every 15 seconds
         }
 
         const feed = document.getElementById('liquidation-feed');
