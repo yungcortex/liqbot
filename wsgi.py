@@ -66,7 +66,6 @@ def wrap_socket(sock):
         
     _send = sock.send
     _close = sock.close
-    _shutdown = getattr(sock, 'shutdown', None)
     
     def safe_send(data, *args, **kwargs):
         try:
@@ -90,21 +89,21 @@ def wrap_socket(sock):
                 return
                 
             # Only attempt shutdown if socket is still valid
-            if _shutdown and hasattr(sock, 'fileno'):
+            if hasattr(sock, 'shutdown') and hasattr(sock, 'fileno'):
                 try:
                     fileno = sock.fileno()
                     if fileno != -1:
                         try:
-                            _shutdown(socket.SHUT_RDWR)
+                            sock.shutdown(2)  # SHUT_RDWR = 2
                         except Exception as e:
                             if not isinstance(e, OSError) or e.errno != errno.ENOTCONN:
                                 logger.warning(f"Error during socket shutdown: {e}")
                 except Exception:
                     pass
             
-            # Close the socket without wait
+            # Close the socket
             try:
-                return _close(abort=True)
+                return _close()
             except Exception as e:
                 if not handle_socket_error(sock, e):
                     logger.error(f"Error in safe_close: {e}")
@@ -154,14 +153,14 @@ def cleanup_socket(sid, socket):
                         if socket.fileno() != -1:
                             if hasattr(socket, 'shutdown'):
                                 try:
-                                    socket.shutdown(socket.SHUT_RDWR)
+                                    socket.shutdown(2)  # SHUT_RDWR = 2
                                 except Exception as e:
                                     handle_socket_error(socket, e)
                     except Exception:
                         pass
                 
                 # Close the socket
-                socket.close(wait=False, abort=True)
+                socket.close()
             except Exception as e:
                 handle_socket_error(socket, e)
             
@@ -228,10 +227,10 @@ def socket_middleware(wsgi_app):
         if 'eventlet.input' in environ and hasattr(environ['eventlet.input'], 'socket'):
             socket = environ['eventlet.input'].socket
             if socket and not (hasattr(socket, 'closed') and socket.closed):
-                # Set socket options
+                # Set socket options if available
                 try:
-                    socket.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-                    socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                    if hasattr(socket, 'setsockopt'):
+                        socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                 except Exception as e:
                     logger.warning(f"Could not set socket options: {e}")
                 environ['eventlet.input'].socket = wrap_socket(socket)
@@ -248,44 +247,44 @@ socketio.init_app(
     cors_allowed_origins=["https://liqbot-038f.onrender.com"],
     ping_timeout=20000,  # Increased ping timeout
     ping_interval=10000,  # Increased ping interval
-    manage_session=False,  # Disable session management to prevent ID mismatch
+    manage_session=False,  # Disable session management
     message_queue=None,
     always_connect=True,
     transports=['websocket'],
-    cookie=None,  # Disable cookies to prevent issues
+    cookie=None,  # Disable cookies
     logger=True,
     engineio_logger=True,
     async_handlers=True,
     monitor_clients=True,
-    upgrade_timeout=5000,
-    max_http_buffer_size=1024 * 1024,  # 1MB HTTP buffer size
+    upgrade_timeout=10000,  # Increased upgrade timeout
+    max_http_buffer_size=1024 * 1024,  # 1MB buffer size
     websocket_ping_interval=10,
     websocket_ping_timeout=20,
     websocket_max_message_size=1024 * 1024,
     cors_credentials=False,
     cors_headers=['Content-Type'],
-    cors_allowed_methods=['GET', 'POST', 'OPTIONS'],  # Explicitly set allowed methods
-    close_timeout=10000,  # Increased close timeout
-    max_queue_size=100,  # Increased queue size
+    cors_allowed_methods=['GET', 'POST', 'OPTIONS'],
+    close_timeout=20000,  # Increased close timeout
+    max_queue_size=100,
     reconnection=True,
-    reconnection_attempts=float('inf'),
+    reconnection_attempts=5,  # Limit reconnection attempts
     reconnection_delay=1000,
     reconnection_delay_max=5000,
-    max_retries=float('inf'),
+    max_retries=5,  # Limit max retries
     retry_delay=1000,
     retry_delay_max=5000,
     ping_interval_grace_period=2000,
     async_handlers_kwargs={'async_mode': 'eventlet'},
     engineio_logger_kwargs={'level': logging.INFO},
-    namespace='/',  # Explicitly set default namespace
-    allow_upgrades=True,  # Enable upgrades for WebSocket
-    initial_packet_timeout=10,  # Initial packet timeout
-    connect_timeout=10,  # Connect timeout
-    upgrades=['websocket'],  # Allow WebSocket upgrades
+    namespace='/',
+    allow_upgrades=True,
+    initial_packet_timeout=10,
+    connect_timeout=10,
+    upgrades=['websocket'],
     allow_reconnection=True,
-    json=True,  # Enable JSON support
-    handle_sigint=False,  # Let gunicorn handle signals
-    max_buffer_size=1024 * 1024  # 1MB buffer size
+    json=True,
+    handle_sigint=False,
+    max_buffer_size=1024 * 1024
 )
 
 # Socket connection handler
