@@ -79,10 +79,18 @@ def handle_connect():
     try:
         sid = request.sid
         logger.info(f"Client connected - SID: {sid}")
-        emit('stats_update', latest_stats)
-        emit('connection_success', {'status': 'connected', 'sid': sid})
+        # Send initial stats
+        emit('stats_update', latest_stats, broadcast=False)
+        emit('connection_success', {'status': 'connected', 'sid': sid}, broadcast=False)
+        # Force event emission
+        socketio.sleep(0)
     except Exception as e:
         logger.error(f"Error in handle_connect: {e}")
+        if hasattr(request, 'sid'):
+            try:
+                socketio.server.disconnect(request.sid, namespace='/')
+            except Exception as cleanup_error:
+                logger.error(f"Error cleaning up connection {request.sid}: {cleanup_error}")
 
 @socketio.on('disconnect')
 def handle_disconnect():
@@ -93,6 +101,11 @@ def handle_disconnect():
         # Clean up any remaining session data
         if hasattr(request, 'sid'):
             try:
+                # Remove client from any rooms
+                rooms = socketio.server.rooms(sid, '/')
+                for room in rooms:
+                    socketio.server.leave_room(sid, room, '/')
+                # Disconnect the client
                 socketio.server.disconnect(request.sid, namespace='/')
             except Exception as e:
                 logger.error(f"Error cleaning up session {request.sid}: {e}")
@@ -123,9 +136,25 @@ def emit_update(data, event_type='stats_update'):
             for symbol, values in data.items():
                 if symbol in latest_stats:
                     latest_stats[symbol].update(values)
-        socketio.emit(event_type, data, namespace='/')
+        
+        # Log the event before emitting
+        logger.info(f"Emitting {event_type} event: {data}")
+        
+        # Emit with broadcast and force immediate send
+        socketio.emit(event_type, data, broadcast=True, namespace='/')
+        socketio.sleep(0)  # Force event emission
+        
+        # Verify emission
+        logger.info(f"Successfully emitted {event_type} event")
     except Exception as e:
         logger.error(f"Error emitting {event_type}: {e}")
+        # Try to recover any broken connections
+        try:
+            for sid in socketio.server.eio.sockets:
+                if not socketio.server.eio.sockets[sid].connected:
+                    socketio.server.disconnect(sid, namespace='/')
+        except Exception as cleanup_error:
+            logger.error(f"Error cleaning up broken connections: {cleanup_error}")
 
 def process_liquidation_event(data):
     """Process a liquidation event and emit it to clients"""
@@ -160,16 +189,24 @@ def process_liquidation_event(data):
         latest_stats[symbol]['total_value'] += value
 
         # Log the event before emitting
-        logger.info(f"Emitting liquidation event: {data}")
+        logger.info(f"Processing liquidation event: {data}")
         logger.info(f"Current stats: {latest_stats}")
 
-        # Emit events with broadcast
+        # Emit events with broadcast and force immediate send
         try:
-            socketio.emit('liquidation', data, broadcast=True)
-            socketio.emit('stats_update', latest_stats, broadcast=True)
-            socketio.sleep(0)  # Force event emission
+            socketio.emit('liquidation', data, broadcast=True, namespace='/')
+            socketio.sleep(0)  # Force first event emission
+            socketio.emit('stats_update', latest_stats, broadcast=True, namespace='/')
+            socketio.sleep(0)  # Force second event emission
         except Exception as e:
             logger.error(f"Error emitting events: {e}")
+            # Try to recover any broken connections
+            try:
+                for sid in socketio.server.eio.sockets:
+                    if not socketio.server.eio.sockets[sid].connected:
+                        socketio.server.disconnect(sid, namespace='/')
+            except Exception as cleanup_error:
+                logger.error(f"Error cleaning up broken connections: {cleanup_error}")
 
     except Exception as e:
         logger.error(f"Error processing liquidation: {e}")
