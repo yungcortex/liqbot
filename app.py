@@ -38,23 +38,11 @@ socketio = SocketIO(
     engineio_logger=True,
     ping_timeout=60,
     ping_interval=25,
-    manage_session=True,
-    cookie=True,
+    manage_session=False,
+    cookie=False,
     always_connect=True,
-    transports=['polling', 'websocket'],
-    websocket=True,
-    upgrade_timeout=30000,
-    max_queue_size=100,
-    json=json,
-    cors_credentials=True,
-    async_handlers=True,
-    monitor_clients=True,
-    allow_upgrades=True,
-    http_compression=True,
-    compression_threshold=1024,
-    max_http_buffer_size=1e6,
-    verify_session=True,
-    session_lifetime=120
+    transports=['websocket', 'polling'],
+    max_http_buffer_size=1e6
 )
 
 # Configure CORS with proper settings

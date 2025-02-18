@@ -223,17 +223,17 @@
             path: '/socket.io/',
             transports: ['websocket', 'polling'],
             reconnection: true,
-            reconnectionAttempts: 5,
+            reconnectionAttempts: Infinity,
             reconnectionDelay: 1000,
             reconnectionDelayMax: 5000,
             timeout: 60000,
             autoConnect: true,
-            forceNew: true,
+            forceNew: false,
             upgrade: true,
             rememberUpgrade: true,
             secure: true,
             rejectUnauthorized: false,
-            withCredentials: true
+            withCredentials: false
         });
 
         // Create a heartbeat mechanism

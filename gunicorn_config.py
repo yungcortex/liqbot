@@ -7,20 +7,20 @@ import os
 bind = "0.0.0.0:" + str(os.getenv("PORT", "10000"))
 backlog = 2048
 
-# Worker processes - optimized for WebSocket connections
-workers = 4  # Fixed number of workers for better stability
+# Worker processes
+workers = 1  # Single worker to avoid session conflicts
 worker_class = "eventlet"
-worker_connections = 2000
+worker_connections = 1000
 
 # Timeouts
-timeout = 300  # 5 minutes
-keepalive = 2
+timeout = 120
+keepalive = 5
 graceful_timeout = 30
 
 # Logging
 accesslog = "-"
 errorlog = "-"
-loglevel = "info"  # Changed from debug to reduce log noise
+loglevel = "info"
 
 # SSL
 keyfile = None
@@ -53,13 +53,12 @@ def on_exit(server):
 # WebSocket settings
 websocket_max_message_size = 16 * 1024 * 1024  # 16MB
 websocket_ping_interval = 25
-websocket_ping_timeout = 120
+websocket_ping_timeout = 60
 websocket_per_message_deflate = True
 
 # Environment settings
 raw_env = [
     "PYTHONUNBUFFERED=1",
-    "PYTHONHASHSEED=random",
 ]
 
 # Preload app

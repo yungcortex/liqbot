@@ -20,11 +20,11 @@ socketio.init_app(
     ping_timeout=60,
     ping_interval=25,
     max_http_buffer_size=1e6,
-    manage_session=True,
+    manage_session=False,
     message_queue=None,
     always_connect=True,
     transports=['websocket', 'polling'],
-    cookie=None,
+    cookie=False,
     logger=True,
     engineio_logger=True
 )
