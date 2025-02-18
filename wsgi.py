@@ -46,6 +46,9 @@ bot_thread = threading.Thread(target=background_tasks)
 bot_thread.daemon = True
 bot_thread.start()
 
+# Create Flask application
+application = app
+
 # Initialize Socket.IO with improved settings
 socketio.init_app(
     app,
