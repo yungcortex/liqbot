@@ -12,6 +12,7 @@ from eventlet import wsgi, websocket
 from eventlet.green import socket
 import errno
 from flask import request
+from flask_cors import CORS
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -179,7 +180,7 @@ application.wsgi_app = socket_middleware(application.wsgi_app)
 socketio.init_app(
     app,
     async_mode='eventlet',
-    cors_allowed_origins=["*"],  # Allow all origins temporarily for testing
+    cors_allowed_origins=["https://liqbot-038f.onrender.com", "http://liqbot-038f.onrender.com", "https://www.liqbot-038f.onrender.com", "http://www.liqbot-038f.onrender.com"],
     ping_timeout=5000,
     ping_interval=2500,
     manage_session=True,
@@ -218,6 +219,18 @@ socketio.init_app(
     async_handlers_kwargs={'async_mode': 'eventlet'},
     engineio_logger_kwargs={'level': logging.INFO}
 )
+
+# Configure CORS for Flask app
+CORS(app, resources={
+    r"/*": {
+        "origins": ["https://liqbot-038f.onrender.com", "http://liqbot-038f.onrender.com", 
+                   "https://www.liqbot-038f.onrender.com", "http://www.liqbot-038f.onrender.com"],
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type", "X-Requested-With"],
+        "supports_credentials": True,
+        "max_age": 3600
+    }
+})
 
 # Socket connection handler
 @socketio.on('connect')

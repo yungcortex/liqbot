@@ -225,7 +225,7 @@
 
     <script>
         // Socket.IO connection with improved timeout handling
-        const socket = io('https://liqbot-038f.onrender.com', {
+        const socket = io(window.location.origin, {
             transports: ['websocket', 'polling'],
             reconnection: true,
             reconnectionAttempts: Infinity,
