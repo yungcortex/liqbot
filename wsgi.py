@@ -89,19 +89,28 @@ def wrap_socket(sock):
             if hasattr(sock, 'closed') and sock.closed:
                 return
                 
-            # Try to shutdown the socket first if it's still valid
+            # Only attempt shutdown if socket is still valid
             if _shutdown and hasattr(sock, 'fileno'):
                 try:
-                    if sock.fileno() != -1:
-                        _shutdown(socket.SHUT_RDWR)
-                except Exception as e:
-                    handle_socket_error(sock, e)
+                    fileno = sock.fileno()
+                    if fileno != -1:
+                        try:
+                            _shutdown(socket.SHUT_RDWR)
+                        except Exception as e:
+                            if not isinstance(e, OSError) or e.errno != errno.ENOTCONN:
+                                logger.warning(f"Error during socket shutdown: {e}")
+                except Exception:
+                    pass
             
-            # Then close it
-            return _close(*args, **kwargs)
+            # Close the socket without wait
+            try:
+                return _close(abort=True)
+            except Exception as e:
+                if not handle_socket_error(sock, e):
+                    logger.error(f"Error in safe_close: {e}")
+                
         except Exception as e:
-            if not handle_socket_error(sock, e):
-                logger.error(f"Error in safe_close: {e}")
+            logger.error(f"Unexpected error in safe_close: {e}")
             
     sock.send = safe_send
     sock.close = safe_close
@@ -219,6 +228,12 @@ def socket_middleware(wsgi_app):
         if 'eventlet.input' in environ and hasattr(environ['eventlet.input'], 'socket'):
             socket = environ['eventlet.input'].socket
             if socket and not (hasattr(socket, 'closed') and socket.closed):
+                # Set socket options
+                try:
+                    socket.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+                    socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                except Exception as e:
+                    logger.warning(f"Could not set socket options: {e}")
                 environ['eventlet.input'].socket = wrap_socket(socket)
         return wsgi_app(environ, start_response)
     return middleware
@@ -269,7 +284,19 @@ socketio.init_app(
     allow_reconnection=True,
     json=True,  # Enable JSON support
     handle_sigint=False,  # Let gunicorn handle signals
-    max_buffer_size=1024 * 1024  # 1MB buffer size
+    max_buffer_size=1024 * 1024,  # 1MB buffer size
+    always_connect=True,  # Always allow connections
+    async_mode_client='eventlet',  # Use eventlet for client connections
+    async_handlers=True,  # Enable async handlers
+    cookie=None,  # Disable cookies to prevent issues
+    engineio_logger=True,  # Enable Engine.IO logging
+    cors_allowed_methods=['GET', 'POST', 'OPTIONS'],  # Explicitly set allowed methods
+    cors_credentials=False,  # Disable credentials
+    max_http_buffer_size=1024 * 1024,  # 1MB HTTP buffer size
+    ping_timeout=20000,  # Increase ping timeout
+    ping_interval=10000,  # Increase ping interval
+    close_timeout=10000,  # Increase close timeout
+    max_queue_size=100  # Increase queue size
 )
 
 # Socket connection handler
@@ -283,7 +310,7 @@ def handle_connect():
             return False
             
         # Wait briefly for Engine.IO socket to be ready
-        max_retries = 3
+        max_retries = 5
         retry_count = 0
         socket = None
         
@@ -293,7 +320,7 @@ def handle_connect():
                 if socket:
                     break
             retry_count += 1
-            eventlet.sleep(0.1)
+            eventlet.sleep(0.2)  # Longer sleep between retries
             
         if not socket:
             logger.error(f"No Engine.IO socket found for {sid} after {retry_count} retries")
@@ -305,7 +332,7 @@ def handle_connect():
                 # Create session
                 socketio.server.manager.initialize()
                 
-                # Add to active connections
+                # Add to active connections first
                 with connection_lock:
                     active_connections[sid] = {
                         'connected_at': time.time(),
@@ -313,8 +340,10 @@ def handle_connect():
                         'socket': socket
                     }
                 
-                # Enter room and wrap socket
+                # Enter room after connection is established
                 socketio.server.enter_room(sid, sid, namespace='/')
+                
+                # Wrap socket with error handling
                 wrapped_socket = wrap_socket(socket)
                 if wrapped_socket:
                     socket_manager.add_socket(sid, wrapped_socket)
@@ -323,33 +352,39 @@ def handle_connect():
                     # Emit connection success with retry
                     max_emit_retries = 3
                     emit_retry_count = 0
-                    while emit_retry_count < max_emit_retries:
+                    success = False
+                    
+                    while emit_retry_count < max_emit_retries and not success:
                         try:
                             socketio.emit('connection_success', 
                                         {'status': 'connected', 'sid': sid}, 
                                         room=sid, 
                                         namespace='/')
                             eventlet.sleep(0)  # Force immediate emission
-                            return True
+                            success = True
                         except Exception as e:
                             emit_retry_count += 1
+                            logger.warning(f"Retry {emit_retry_count}/{max_emit_retries} failed: {e}")
                             if emit_retry_count == max_emit_retries:
-                                logger.error(f"Failed to emit connection success after {max_emit_retries} attempts: {e}")
+                                logger.error(f"Failed to emit connection success after {max_emit_retries} attempts")
                                 cleanup_socket(sid, wrapped_socket)
                                 return False
-                            eventlet.sleep(0.1)
+                            eventlet.sleep(0.2)  # Longer sleep between retries
+                    
+                    return True
                     
             except Exception as e:
                 logger.error(f"Error initializing Socket.IO session for {sid}: {e}")
+                cleanup_socket(sid, socket)
                 return False
             
     except Exception as e:
         logger.error(f"Error in handle_connect: {e}")
-        if 'sid' in locals():
-            cleanup_socket(sid, None)
+        if 'sid' in locals() and 'socket' in locals():
+            cleanup_socket(sid, socket)
         return False
     
-    return True
+    return False  # Fallback return
 
 @socketio.on('disconnect')
 def handle_disconnect():
