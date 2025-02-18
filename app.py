@@ -59,7 +59,6 @@ socketio = SocketIO(
     ping_interval_grace_period=2000,
     allow_upgrades=False,  # Disable upgrades to prevent race conditions
     initial_packet_timeout=5,  # Reduce initial packet timeout
-    json=json,  # Use standard json
     connect_timeout=5,
     upgrades=[],  # Disable all upgrades
     allow_reconnection=True
