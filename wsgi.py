@@ -89,12 +89,14 @@ def wrap_socket(sock):
                 return
                 
             # Only attempt shutdown if socket is still valid
-            if hasattr(sock, 'shutdown') and hasattr(sock, 'fileno'):
+            if hasattr(sock, 'fileno'):
                 try:
                     fileno = sock.fileno()
                     if fileno != -1:
                         try:
-                            sock.shutdown(2)  # SHUT_RDWR = 2
+                            # Use raw socket shutdown
+                            import socket as socket_lib
+                            sock.shutdown(socket_lib.SHUT_RDWR)
                         except Exception as e:
                             if not isinstance(e, OSError) or e.errno != errno.ENOTCONN:
                                 logger.warning(f"Error during socket shutdown: {e}")
@@ -150,12 +152,14 @@ def cleanup_socket(sid, socket):
                 # Check if socket is still valid before attempting shutdown
                 if hasattr(socket, 'fileno'):
                     try:
-                        if socket.fileno() != -1:
-                            if hasattr(socket, 'shutdown'):
-                                try:
-                                    socket.shutdown(2)  # SHUT_RDWR = 2
-                                except Exception as e:
-                                    handle_socket_error(socket, e)
+                        fileno = socket.fileno()
+                        if fileno != -1:
+                            try:
+                                # Use raw socket shutdown
+                                import socket as socket_lib
+                                socket.shutdown(socket_lib.SHUT_RDWR)
+                            except Exception as e:
+                                handle_socket_error(socket, e)
                     except Exception:
                         pass
                 
@@ -225,15 +229,17 @@ def socket_middleware(wsgi_app):
     def middleware(environ, start_response):
         # Only wrap valid sockets
         if 'eventlet.input' in environ and hasattr(environ['eventlet.input'], 'socket'):
-            socket = environ['eventlet.input'].socket
-            if socket and not (hasattr(socket, 'closed') and socket.closed):
+            sock = environ['eventlet.input'].socket
+            if sock and not (hasattr(sock, 'closed') and sock.closed):
                 # Set socket options if available
                 try:
-                    if hasattr(socket, 'setsockopt'):
-                        socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                    import socket as socket_lib
+                    if hasattr(sock, 'setsockopt'):
+                        # Use TCP_NODELAY from socket library
+                        sock.setsockopt(socket_lib.IPPROTO_TCP, socket_lib.TCP_NODELAY, 1)
                 except Exception as e:
                     logger.warning(f"Could not set socket options: {e}")
-                environ['eventlet.input'].socket = wrap_socket(socket)
+                environ['eventlet.input'].socket = wrap_socket(sock)
         return wsgi_app(environ, start_response)
     return middleware
 
@@ -256,35 +262,40 @@ socketio.init_app(
     engineio_logger=True,
     async_handlers=True,
     monitor_clients=True,
-    upgrade_timeout=10000,  # Increased upgrade timeout
+    upgrade_timeout=20000,  # Further increased upgrade timeout
     max_http_buffer_size=1024 * 1024,  # 1MB buffer size
-    websocket_ping_interval=10,
-    websocket_ping_timeout=20,
+    websocket_ping_interval=5000,  # Reduced websocket ping interval
+    websocket_ping_timeout=10000,  # Increased websocket ping timeout
     websocket_max_message_size=1024 * 1024,
     cors_credentials=False,
     cors_headers=['Content-Type'],
     cors_allowed_methods=['GET', 'POST', 'OPTIONS'],
-    close_timeout=20000,  # Increased close timeout
+    close_timeout=30000,  # Further increased close timeout
     max_queue_size=100,
     reconnection=True,
-    reconnection_attempts=5,  # Limit reconnection attempts
-    reconnection_delay=1000,
-    reconnection_delay_max=5000,
-    max_retries=5,  # Limit max retries
-    retry_delay=1000,
-    retry_delay_max=5000,
-    ping_interval_grace_period=2000,
+    reconnection_attempts=3,  # Reduced reconnection attempts
+    reconnection_delay=2000,  # Increased reconnection delay
+    reconnection_delay_max=10000,  # Increased max reconnection delay
+    max_retries=3,  # Reduced max retries
+    retry_delay=2000,  # Increased retry delay
+    retry_delay_max=10000,  # Increased max retry delay
+    ping_interval_grace_period=5000,  # Increased grace period
     async_handlers_kwargs={'async_mode': 'eventlet'},
     engineio_logger_kwargs={'level': logging.INFO},
     namespace='/',
     allow_upgrades=True,
-    initial_packet_timeout=10,
-    connect_timeout=10,
+    initial_packet_timeout=20,  # Increased initial packet timeout
+    connect_timeout=20,  # Increased connect timeout
     upgrades=['websocket'],
     allow_reconnection=True,
     json=True,
     handle_sigint=False,
-    max_buffer_size=1024 * 1024
+    max_buffer_size=1024 * 1024,
+    always_connect_same_sid=False,  # Prevent sid reuse
+    max_decode_packets=50,  # Limit packet decoding
+    max_encode_packets=50,  # Limit packet encoding
+    http_compression=True,  # Enable HTTP compression
+    compression_threshold=1024  # Compression threshold
 )
 
 # Socket connection handler
