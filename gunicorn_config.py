@@ -12,15 +12,15 @@ bind = f"0.0.0.0:{os.environ.get('PORT', '10000')}"
 backlog = 2048
 
 # Worker processes
-workers = 1  # Single worker for WebSocket
+workers = 1
 worker_class = "eventlet"
-worker_connections = 2000
+worker_connections = 1000
 threads = 1
-keepalive = 65
 
 # Timeouts
 timeout = 300
 graceful_timeout = 60
+keepalive = 5
 
 # Logging
 accesslog = "-"
@@ -70,15 +70,9 @@ def pre_fork(server, worker):
 
 def post_fork(server, worker):
     """Set up worker after fork."""
-    logger.info("Worker spawned (pid: %s)", worker.pid)
+    server.log.info("Worker spawned (pid: %s)", worker.pid)
     # Initialize eventlet hub
     eventlet.hubs.use_hub()
-    # Increase file descriptor limit
-    try:
-        import resource
-        resource.setrlimit(resource.RLIMIT_NOFILE, (65536, 65536))
-    except Exception as e:
-        logger.error(f"Error setting file descriptor limit: {e}")
 
 def pre_exec(server):
     """Pre-exec handler."""
@@ -87,25 +81,14 @@ def pre_exec(server):
 
 def worker_int(worker):
     """Handle worker interruption signals."""
-    logger.info("Worker received INT or QUIT signal")
-    try:
-        if hasattr(worker, 'app') and hasattr(worker.app, 'wsgi'):
-            app = worker.app.wsgi
-            if hasattr(app, 'socketio'):
-                # Gracefully disconnect all clients
-                for sid, socket in app.socketio.server.eio.sockets.items():
-                    try:
-                        socket.close()
-                    except Exception:
-                        pass
-                app.socketio.server.disconnect()
-    except Exception as e:
-        logger.error(f"Error in worker_int: {e}")
+    worker.log.info("worker received INT or QUIT signal")
+    
+    import sys
+    sys.exit(0)
 
 def worker_abort(worker):
     """Handle worker abort."""
-    logger.info("Worker aborted")
-    worker_int(worker)
+    worker.log.info("worker received SIGABRT signal")
 
 def worker_exit(server, worker):
     """Clean up after worker exit."""

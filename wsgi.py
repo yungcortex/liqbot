@@ -54,24 +54,24 @@ socketio.init_app(
     app,
     async_mode='eventlet',
     cors_allowed_origins=["https://liqbot-038f.onrender.com"],
-    ping_timeout=60000,
-    ping_interval=25000,
+    ping_timeout=20000,
+    ping_interval=10000,
     manage_session=True,
     message_queue=None,
     always_connect=True,
-    transports=['websocket', 'polling'],
+    transports=['polling', 'websocket'],
     cookie=None,
     logger=True,
     engineio_logger=True,
     async_handlers=True,
     monitor_clients=False,
-    upgrade_timeout=60000,
+    upgrade_timeout=20000,
     max_http_buffer_size=1024 * 1024,
-    websocket_ping_interval=25000,
-    websocket_ping_timeout=60000,
+    websocket_ping_interval=10000,
+    websocket_ping_timeout=20000,
     cors_credentials=False,
     cors_headers=['Content-Type', 'X-Requested-With'],
-    close_timeout=60000,
+    close_timeout=20000,
     max_queue_size=100,
     reconnection=True,
     reconnection_attempts=float('inf'),
@@ -80,7 +80,7 @@ socketio.init_app(
     max_retries=float('inf'),
     retry_delay=1000,
     retry_delay_max=5000,
-    ping_interval_grace_period=5000,
+    ping_interval_grace_period=2000,
     allow_upgrades=True,
     json=True,
     http_compression=True,
@@ -160,6 +160,9 @@ def handle_heartbeat():
             socketio.emit('heartbeat_response', {'status': 'alive'}, room=sid)
     except Exception as e:
         logger.error(f"Error in handle_heartbeat: {e}")
+
+# Wrap the Flask app with Socket.IO
+application = socketio.middleware(application)
 
 # For local development
 if __name__ == '__main__':
