@@ -221,22 +221,19 @@
         // Configure Socket.IO to connect to the correct endpoint
         const socket = io({
             path: '/socket.io/',
-            transports: ['polling', 'websocket'],
+            transports: ['websocket', 'polling'],
             reconnection: true,
-            reconnectionAttempts: Infinity,
+            reconnectionAttempts: 5,
             reconnectionDelay: 1000,
             reconnectionDelayMax: 5000,
-            timeout: 120000,
+            timeout: 60000,
             autoConnect: true,
-            forceNew: false,
+            forceNew: true,
             upgrade: true,
             rememberUpgrade: true,
-            secure: window.location.protocol === 'https:',
+            secure: true,
             rejectUnauthorized: false,
-            withCredentials: false,
-            extraHeaders: {
-                "Access-Control-Allow-Origin": "*"
-            }
+            withCredentials: true
         });
 
         // Create a heartbeat mechanism

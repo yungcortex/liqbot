@@ -12,19 +12,21 @@ bot_thread.start()
 # Create the WSGI application
 application = app
 
-# Initialize Socket.IO with improved settings
+# Initialize Socket.IO with improved settings for Render
 socketio.init_app(
     app,
     async_mode='eventlet',
-    cors_allowed_origins="*",
-    ping_timeout=120,
+    cors_allowed_origins=["https://liqbot-038f.onrender.com"],
+    ping_timeout=60,
     ping_interval=25,
-    max_http_buffer_size=1e8,
-    manage_session=False,
+    max_http_buffer_size=1e6,
+    manage_session=True,
     message_queue=None,
     always_connect=True,
-    transports=['polling', 'websocket'],
-    cookie=None
+    transports=['websocket', 'polling'],
+    cookie=None,
+    logger=True,
+    engineio_logger=True
 )
 
 # For local development

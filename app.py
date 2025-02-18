@@ -62,10 +62,9 @@ CORS(app, resources={
     r"/*": {
         "origins": ["https://liqbot-038f.onrender.com"],
         "methods": ["GET", "POST", "OPTIONS"],
-        "allow_headers": ["Content-Type", "X-Requested-With", "Authorization"],
+        "allow_headers": ["Content-Type"],
         "supports_credentials": True,
-        "max_age": 3600,
-        "expose_headers": ["Content-Length", "Content-Type"]
+        "max_age": 3600
     }
 })
 
