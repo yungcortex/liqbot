@@ -32,42 +32,35 @@ app.config['PROPAGATE_EXCEPTIONS'] = True
 # Initialize SocketIO with optimized settings
 socketio = SocketIO(
     app,
-    cors_allowed_origins=["https://liqbot-038f.onrender.com", "http://localhost:*"],
+    cors_allowed_origins="*",  # Allow all origins temporarily
     async_mode='eventlet',
     logger=True,
     engineio_logger=True,
-    ping_timeout=120,
+    ping_timeout=60,
     ping_interval=25,
-    max_http_buffer_size=1e8,
-    manage_session=True,
-    cookie=True,
+    manage_session=False,  # Disable session management
+    cookie=None,  # Disable cookies
     always_connect=True,
-    transports=['polling'],  # Only use polling
-    websocket=False,  # Explicitly disable WebSocket
-    upgrade_timeout=30000,
+    transports=['polling', 'websocket'],  # Enable both transports
+    websocket=True,  # Enable WebSocket
+    upgrade_timeout=10000,
     max_queue_size=100,
     json=json,
-    cors_credentials=True,
+    cors_credentials=False,  # Disable CORS credentials
     async_handlers=True,
     monitor_clients=True,
-    allow_upgrades=False,  # Disable upgrades
+    allow_upgrades=True,  # Allow upgrades
     http_compression=True,
-    compression_threshold=1024,
-    session_lifetime=120,  # 2 minutes session lifetime
-    message_queue=None,  # Disable message queue
-    engineio_logger_level='DEBUG',  # More detailed logging
-    verify_session=False  # Don't verify session for now
+    compression_threshold=1024
 )
 
-# Configure CORS with more permissive settings
+# Configure CORS with simpler settings
 CORS(app, resources={
     r"/*": {
-        "origins": ["https://liqbot-038f.onrender.com", "http://localhost:*"],
+        "origins": "*",
         "methods": ["GET", "POST", "OPTIONS"],
         "allow_headers": ["*"],
-        "expose_headers": ["*"],
-        "supports_credentials": True,
-        "max_age": 3600  # 1 hour
+        "supports_credentials": False
     }
 })
 
@@ -91,20 +84,9 @@ def handle_connect():
     """Handle client connection"""
     try:
         sid = request.sid
-        transport = request.environ.get('wsgi.url_scheme', 'unknown')
-        logger.info(f"Client connected - SID: {sid}, Transport: {transport}")
-        
-        # Send initial stats immediately after connection
+        logger.info(f"Client connected - SID: {sid}")
         emit('stats_update', latest_stats)
         emit('connection_success', {'status': 'connected', 'sid': sid})
-        
-        # Store session data
-        session = {}
-        session['connected'] = True
-        session['transport'] = transport
-        session['created_at'] = datetime.now().timestamp()
-        socketio.server.save_session(sid, session)
-        
     except Exception as e:
         logger.error(f"Error in handle_connect: {e}")
 
@@ -114,13 +96,6 @@ def handle_disconnect():
     try:
         sid = request.sid
         logger.info(f"Client disconnected - SID: {sid}")
-        
-        # Clean up session
-        try:
-            socketio.server.remove_session(sid)
-        except Exception as session_error:
-            logger.error(f"Error removing session for SID {sid}: {session_error}")
-            
     except Exception as e:
         logger.error(f"Error in handle_disconnect: {e}")
 
@@ -228,12 +203,10 @@ if __name__ == '__main__':
         debug=False,
         use_reloader=False,
         log_output=True,
-        ping_timeout=120,
+        ping_timeout=60,
         ping_interval=25,
-        max_http_buffer_size=1e8,
-        cors_allowed_origins=["https://liqbot-038f.onrender.com", "http://localhost:*"],
-        websocket=False,  # Explicitly disable WebSocket
-        allow_upgrades=False,  # Disable upgrades
-        http_compression=True,
-        compression_threshold=1024
+        cors_allowed_origins="*",
+        websocket=True,
+        allow_upgrades=True,
+        http_compression=True
     ) 
