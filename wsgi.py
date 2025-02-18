@@ -261,7 +261,8 @@ socketio.init_app(
     retry_delay_max=5000,
     ping_interval_grace_period=2000,
     async_handlers_kwargs={'async_mode': 'eventlet'},
-    engineio_logger_kwargs={'level': logging.INFO}
+    engineio_logger_kwargs={'level': logging.INFO},
+    namespace='/'  # Explicitly set default namespace
 )
 
 # Socket connection handler
@@ -274,69 +275,48 @@ def handle_connect():
             logger.error("No session ID found for connection")
             return False
             
-        # Wait for socket to be fully initialized with exponential backoff
-        max_retries = 5
-        retry_count = 0
+        # Immediately try to get the socket first
         socket = None
-        
-        while retry_count < max_retries:
-            if hasattr(socketio.server, 'eio'):
-                socket = socketio.server.eio.sockets.get(sid)
-                if socket:
-                    break
+        if hasattr(socketio.server, 'eio'):
+            socket = socketio.server.eio.sockets.get(sid)
+            
+        # If not found, use shorter retries with minimal delay
+        if not socket:
+            max_retries = 3
+            retry_count = 0
+            while retry_count < max_retries:
+                if hasattr(socketio.server, 'eio'):
+                    socket = socketio.server.eio.sockets.get(sid)
+                    if socket:
+                        break
                 retry_count += 1
-                wait_time = 0.1 * (2 ** retry_count)  # Exponential backoff
-                eventlet.sleep(wait_time)
-                logger.info(f"Retry {retry_count}/{max_retries} for socket {sid}")
+                eventlet.sleep(0.05)  # Very short delay
+                logger.info(f"Quick retry {retry_count}/{max_retries} for socket {sid}")
                 
         if not socket:
-            logger.error(f"No socket found for {sid} after {max_retries} retries")
+            logger.error(f"No socket found for {sid} after quick retries")
             return False
             
-        # Ensure socket is properly initialized
-        if not hasattr(socket, 'handler') or not socket.handler:
-            logger.error(f"Socket {sid} not properly initialized")
-            return False
+        # Force namespace connection
+        if hasattr(socketio.server, 'manager'):
+            socketio.server.manager.initialize(sid)
+            socketio.server.manager.connect(sid, '/')
             
-        # Check if socket is already closed
-        if hasattr(socket, 'closed') and socket.closed:
-            logger.warning(f"Socket {sid} is already closed")
-            return False
-            
-        # Check if socket is still valid
-        if hasattr(socket, 'fileno'):
-            try:
-                if socket.fileno() == -1:
-                    logger.warning(f"Socket {sid} has invalid file descriptor")
-                    return False
-            except Exception as e:
-                logger.warning(f"Error checking socket validity: {e}")
-                return False
-        
         # Wrap socket with error handling
         wrapped_socket = wrap_socket(socket)
         if wrapped_socket:
             socket_manager.add_socket(sid, wrapped_socket)
             logger.info(f"New socket connection established: {sid}")
             
-            # Force socket into connected state
-            if hasattr(socketio.server, 'manager'):
-                socketio.server.manager.set_client_connecting(sid, '/')
-                socketio.server.manager.set_client_connected(sid, '/')
-            
-            # Emit initial connection success with retry
-            max_emit_retries = 3
-            for i in range(max_emit_retries):
-                try:
-                    emit('connection_success', {'status': 'connected', 'sid': sid})
-                    socketio.sleep(0)  # Force immediate emission
-                    return True
-                except Exception as e:
-                    if i == max_emit_retries - 1:
-                        logger.error(f"Failed to send connection success after {max_emit_retries} attempts: {e}")
-                        cleanup_socket(sid, wrapped_socket)
-                        return False
-                    eventlet.sleep(0.1)
+            # Immediately emit connection success
+            try:
+                emit('connection_success', {'status': 'connected', 'sid': sid}, namespace='/')
+                socketio.sleep(0)  # Force immediate emission
+                return True
+            except Exception as e:
+                logger.error(f"Error sending connection success: {e}")
+                cleanup_socket(sid, wrapped_socket)
+                return False
             
     except Exception as e:
         logger.error(f"Error in handle_connect: {e}")
@@ -353,6 +333,8 @@ def handle_disconnect():
         sid = request.sid
         if sid:
             logger.info(f"Client disconnecting: {sid}")
+            if hasattr(socketio.server, 'manager'):
+                socketio.server.manager.disconnect(sid, '/')
             cleanup_socket(sid, socketio.server.eio.sockets.get(sid))
     except Exception as e:
         logger.error(f"Error in handle_disconnect: {e}")
