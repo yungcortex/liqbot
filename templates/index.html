@@ -224,16 +224,16 @@
     </div>
 
     <script>
-        // Socket.IO connection with improved timeout handling
+        // Socket.IO connection with improved settings
         const socket = io(window.location.origin, {
-            transports: ['polling', 'websocket'],
+            transports: ['websocket', 'polling'],
             reconnection: true,
             reconnectionAttempts: Infinity,
             reconnectionDelay: 1000,
             reconnectionDelayMax: 5000,
-            timeout: 20000,
+            timeout: 60000,
             autoConnect: true,
-            forceNew: true,
+            forceNew: false,
             secure: true,
             rejectUnauthorized: false,
             withCredentials: false,
@@ -246,9 +246,9 @@
             rememberUpgrade: true,
             timestampRequests: false,
             timestampParam: 't',
-            closeOnBeforeunload: true,
-            pingInterval: 10000,
-            pingTimeout: 20000
+            closeOnBeforeunload: false,
+            pingInterval: 25000,
+            pingTimeout: 60000
         });
 
         // Connection state tracking
@@ -341,17 +341,19 @@
             heartbeatInterval = setInterval(() => {
                 if (socket.connected) {
                     console.log('[Socket] Sending heartbeat');
-                    missedHeartbeats++;
                     socket.emit('heartbeat', () => {
                         console.log('[Socket] Heartbeat acknowledged');
                         missedHeartbeats = 0;
                     });
                     
+                    missedHeartbeats++;
                     if (missedHeartbeats >= MAX_MISSED_HEARTBEATS) {
                         console.log('[Socket] Too many missed heartbeats, reconnecting...');
                         stopHeartbeat();
                         socket.disconnect();
-                        socket.connect();
+                        setTimeout(() => {
+                            socket.connect();
+                        }, 1000);
                     }
                 }
             }, HEARTBEAT_INTERVAL);
