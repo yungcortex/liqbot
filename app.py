@@ -29,15 +29,6 @@ app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your_secret_key_here')
 app.config['DEBUG'] = False
 app.config['PROPAGATE_EXCEPTIONS'] = True
 
-# Initialize CORS with specific origins
-CORS(app, resources={
-    r"/*": {
-        "origins": ["https://liqbot-038f.onrender.com", "http://localhost:*"],
-        "methods": ["GET", "POST", "OPTIONS"],
-        "allow_headers": ["Content-Type"]
-    }
-})
-
 # Initialize SocketIO with optimized settings
 socketio = SocketIO(
     app,
@@ -45,17 +36,35 @@ socketio = SocketIO(
     async_mode='eventlet',
     logger=False,
     engineio_logger=False,
-    ping_timeout=20,
-    ping_interval=10,
+    ping_timeout=5,
+    ping_interval=25,
     max_http_buffer_size=1e6,
-    manage_session=False,
-    cookie=None,
+    manage_session=True,
+    cookie=True,
     always_connect=True,
     transports=['websocket'],
-    upgrade_timeout=5000,
+    upgrade_timeout=1000,
     max_queue_size=100,
-    json=json
+    json=json,
+    async_handlers=True,
+    reconnection=True,
+    reconnection_attempts=5,
+    reconnection_delay=1000,
+    reconnection_delay_max=5000,
+    randomization_factor=0.5,
+    handle_sigint=False
 )
+
+# Configure CORS with more specific settings
+CORS(app, resources={
+    r"/socket.io/*": {
+        "origins": ["https://liqbot-038f.onrender.com", "http://localhost:*"],
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type"],
+        "supports_credentials": True,
+        "max_age": 3600
+    }
+})
 
 # Add parent directory to path to import liquidation_bot
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -79,9 +88,12 @@ def handle_connect():
         sid = request.sid
         transport = request.environ.get('wsgi.url_scheme', 'unknown')
         logger.info(f"Client connected - SID: {sid}, Transport: {transport}")
+        # Send initial stats immediately after connection
         emit('stats_update', latest_stats, room=sid)
+        emit('connection_success', {'status': 'connected', 'sid': sid}, room=sid)
     except Exception as e:
         logger.error(f"Error in handle_connect: {e}")
+        emit('connection_error', {'error': str(e)}, room=request.sid)
 
 @socketio.on('disconnect')
 def handle_disconnect():
@@ -89,6 +101,7 @@ def handle_disconnect():
     try:
         sid = request.sid
         logger.info(f"Client disconnected - SID: {sid}")
+        socketio.server.disconnect(sid)
     except Exception as e:
         logger.error(f"Error in handle_disconnect: {e}")
 
@@ -98,6 +111,8 @@ def default_error_handler(e):
     try:
         sid = request.sid if hasattr(request, 'sid') else 'Unknown'
         logger.error(f"Socket.IO error for SID {sid}: {str(e)}")
+        if hasattr(request, 'sid'):
+            emit('error', {'error': str(e)}, room=request.sid)
     except Exception as error:
         logger.error(f"Error in error handler: {error}")
 
@@ -197,8 +212,8 @@ if __name__ == '__main__':
         debug=False,
         use_reloader=False,
         log_output=True,
-        ping_timeout=30,
-        ping_interval=15,
+        ping_timeout=5,
+        ping_interval=25,
         max_http_buffer_size=1e6,
         cors_allowed_origins=["https://liqbot-038f.onrender.com", "http://localhost:*"]
     ) 
