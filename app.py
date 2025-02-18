@@ -42,19 +42,21 @@ socketio = SocketIO(
     manage_session=True,
     cookie=True,
     always_connect=True,
-    transports=['polling'],  # Start with polling only
+    transports=['polling'],  # Only use polling
+    websocket=False,  # Explicitly disable WebSocket
     upgrade_timeout=30000,
     max_queue_size=100,
     json=json,
     cors_credentials=True,
     async_handlers=True,
     monitor_clients=True,
-    allow_upgrades=False,  # Disable upgrades temporarily
+    allow_upgrades=False,  # Disable upgrades
     http_compression=True,
     compression_threshold=1024,
     session_lifetime=120,  # 2 minutes session lifetime
     message_queue=None,  # Disable message queue
-    engineio_logger_level='DEBUG'  # More detailed logging
+    engineio_logger_level='DEBUG',  # More detailed logging
+    verify_session=False  # Don't verify session for now
 )
 
 # Configure CORS with more permissive settings
@@ -92,16 +94,17 @@ def handle_connect():
         transport = request.environ.get('wsgi.url_scheme', 'unknown')
         logger.info(f"Client connected - SID: {sid}, Transport: {transport}")
         
-        # Store session data
-        session = socketio.server.get_session(sid)
-        if session:
-            session['connected'] = True
-            session['transport'] = transport
-            socketio.server.save_session(sid, session)
-        
         # Send initial stats immediately after connection
         emit('stats_update', latest_stats)
         emit('connection_success', {'status': 'connected', 'sid': sid})
+        
+        # Store session data
+        session = {}
+        session['connected'] = True
+        session['transport'] = transport
+        session['created_at'] = datetime.now().timestamp()
+        socketio.server.save_session(sid, session)
+        
     except Exception as e:
         logger.error(f"Error in handle_connect: {e}")
 
@@ -114,12 +117,9 @@ def handle_disconnect():
         
         # Clean up session
         try:
-            session = socketio.server.get_session(sid)
-            if session:
-                session['connected'] = False
-                socketio.server.save_session(sid, session)
+            socketio.server.remove_session(sid)
         except Exception as session_error:
-            logger.error(f"Error cleaning up session for SID {sid}: {session_error}")
+            logger.error(f"Error removing session for SID {sid}: {session_error}")
             
     except Exception as e:
         logger.error(f"Error in handle_disconnect: {e}")
@@ -134,24 +134,12 @@ def default_error_handler(e):
         # Try to clean up session on error
         if hasattr(request, 'sid'):
             try:
-                session = socketio.server.get_session(request.sid)
-                if session:
-                    session['error'] = str(e)
-                    socketio.server.save_session(request.sid, session)
+                socketio.server.remove_session(request.sid)
             except Exception as session_error:
-                logger.error(f"Error updating session for SID {request.sid}: {session_error}")
+                logger.error(f"Error removing session for SID {request.sid}: {session_error}")
                 
     except Exception as error:
         logger.error(f"Error in error handler: {error}")
-
-@socketio.on('heartbeat')
-def handle_heartbeat():
-    """Handle heartbeat messages from clients"""
-    try:
-        sid = request.sid
-        socketio.emit('heartbeat_response', {'status': 'ok', 'sid': sid}, room=sid)
-    except Exception as e:
-        logger.error(f"Error in handle_heartbeat: {e}")
 
 def emit_update(data, event_type='stats_update'):
     """Emit updates to all connected clients"""
@@ -160,7 +148,7 @@ def emit_update(data, event_type='stats_update'):
             for symbol, values in data.items():
                 if symbol in latest_stats:
                     latest_stats[symbol].update(values)
-        socketio.emit(event_type, data, namespace='/')
+        socketio.emit(event_type, data)  # Emit without namespace
     except Exception as e:
         logger.error(f"Error emitting {event_type}: {e}")
 
@@ -244,7 +232,8 @@ if __name__ == '__main__':
         ping_interval=25,
         max_http_buffer_size=1e8,
         cors_allowed_origins=["https://liqbot-038f.onrender.com", "http://localhost:*"],
-        allow_upgrades=False,  # Disable upgrades temporarily
+        websocket=False,  # Explicitly disable WebSocket
+        allow_upgrades=False,  # Disable upgrades
         http_compression=True,
         compression_threshold=1024
     ) 
