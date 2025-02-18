@@ -264,7 +264,21 @@ socketio.init_app(
     engineio_logger_kwargs={'level': logging.INFO},
     namespace='/',  # Explicitly set default namespace
     allow_upgrades=False,  # Disable upgrades to prevent race conditions
-    initial_packet_timeout=5  # Reduce initial packet timeout
+    initial_packet_timeout=5,  # Reduce initial packet timeout
+    json=json,  # Use standard json
+    async_mode_client='eventlet',
+    always_connect=True,
+    connect_timeout=5,
+    upgrades=[],  # Disable all upgrades
+    allow_reconnection=True,
+    max_http_buffer_size=1024 * 1024,
+    ping_timeout=20,
+    ping_interval=10,
+    max_queue_size=10,
+    logger=True,
+    engineio_logger=True,
+    monitor_clients=True,
+    cors_allowed_origins=["https://liqbot-038f.onrender.com"]
 )
 
 # Socket connection handler
@@ -277,23 +291,29 @@ def handle_connect():
             logger.error("No session ID found for connection")
             return False
             
-        # Get the socket immediately
+        # Wait briefly for Engine.IO socket to be ready
+        eventlet.sleep(0.1)
+            
+        # Get the Engine.IO socket
         socket = None
         if hasattr(socketio.server, 'eio'):
             socket = socketio.server.eio.sockets.get(sid)
             
         if not socket:
-            logger.error(f"No socket found for {sid}")
+            logger.error(f"No Engine.IO socket found for {sid}")
             return False
             
-        # Initialize namespace first
+        # Initialize Socket.IO session
         if hasattr(socketio.server, 'manager'):
             try:
+                # Create session
                 socketio.server.manager.initialize(sid)
-                socketio.server.manager.connect(sid, '/')
-                logger.info(f"Namespace initialized for {sid}")
+                # Connect to default namespace
+                socketio.server.enter_room(sid, sid, namespace='/')
+                socketio.server.manager.connect(sid, '/', {})
+                logger.info(f"Socket.IO session initialized for {sid}")
             except Exception as e:
-                logger.error(f"Error initializing namespace for {sid}: {e}")
+                logger.error(f"Error initializing Socket.IO session for {sid}: {e}")
                 return False
             
         # Wrap socket with error handling
@@ -305,7 +325,7 @@ def handle_connect():
             # Emit connection success
             try:
                 socketio.emit('connection_success', {'status': 'connected', 'sid': sid}, room=sid, namespace='/')
-                socketio.sleep(0)  # Force immediate emission
+                eventlet.sleep(0)  # Force immediate emission
                 return True
             except Exception as e:
                 logger.error(f"Error sending connection success: {e}")
@@ -328,6 +348,7 @@ def handle_disconnect():
         if sid:
             logger.info(f"Client disconnecting: {sid}")
             if hasattr(socketio.server, 'manager'):
+                socketio.server.leave_room(sid, sid, namespace='/')
                 socketio.server.manager.disconnect(sid, '/')
             cleanup_socket(sid, socketio.server.eio.sockets.get(sid))
     except Exception as e:
