@@ -36,22 +36,23 @@ socketio = SocketIO(
     async_mode='eventlet',
     logger=True,
     engineio_logger=True,
-    ping_timeout=60,
-    ping_interval=25,
-    max_http_buffer_size=1e6,
-    manage_session=False,
-    cookie=None,
+    ping_timeout=120,  # Match server's 120000ms setting
+    ping_interval=25,  # Match server's 25000ms setting
+    max_http_buffer_size=1e8,  # Match server's maxPayload
+    manage_session=True,  # Enable session management
+    cookie=True,  # Enable cookies for session handling
     always_connect=True,
-    transports=['websocket', 'polling'],
+    transports=['polling', 'websocket'],  # Start with polling, then upgrade
     upgrade_timeout=20000,
     max_queue_size=100,
     json=json,
     cors_credentials=True,
-    async_handlers=False,
-    monitor_clients=False,
+    async_handlers=True,
+    monitor_clients=True,
     allow_upgrades=True,
     http_compression=True,
-    compression_threshold=1024
+    compression_threshold=1024,
+    session_lifetime=60  # 1 minute session lifetime
 )
 
 # Configure CORS with more permissive settings
@@ -62,7 +63,7 @@ CORS(app, resources={
         "allow_headers": ["*"],
         "expose_headers": ["*"],
         "supports_credentials": True,
-        "send_wildcard": True
+        "max_age": 1800  # 30 minutes
     }
 })
 
@@ -89,10 +90,11 @@ def handle_connect():
         transport = request.environ.get('wsgi.url_scheme', 'unknown')
         logger.info(f"Client connected - SID: {sid}, Transport: {transport}")
         # Send initial stats immediately after connection
-        emit('stats_update', latest_stats)
-        emit('connection_success', {'status': 'connected', 'sid': sid})
+        emit('stats_update', latest_stats, room=sid)
+        emit('connection_success', {'status': 'connected', 'sid': sid}, room=sid)
     except Exception as e:
         logger.error(f"Error in handle_connect: {e}")
+        emit('connection_error', {'error': str(e)}, room=request.sid)
 
 @socketio.on('disconnect')
 def handle_disconnect():
@@ -100,6 +102,7 @@ def handle_disconnect():
     try:
         sid = request.sid
         logger.info(f"Client disconnected - SID: {sid}")
+        socketio.server.disconnect(sid)  # Properly clean up the session
     except Exception as e:
         logger.error(f"Error in handle_disconnect: {e}")
 
@@ -208,9 +211,9 @@ if __name__ == '__main__':
         debug=False,
         use_reloader=False,
         log_output=True,
-        ping_timeout=60,
+        ping_timeout=120,
         ping_interval=25,
-        max_http_buffer_size=1e6,
+        max_http_buffer_size=1e8,
         cors_allowed_origins=["https://liqbot-038f.onrender.com", "http://localhost:*"],
         allow_upgrades=True,
         http_compression=True,
