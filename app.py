@@ -91,7 +91,19 @@ def is_socket_valid(sid):
         if sid not in active_connections:
             return False
             
-        socket = socketio.server.eio.sockets.get(sid)
+        # Wait briefly for socket to be available
+        max_retries = 3
+        retry_count = 0
+        socket = None
+        
+        while retry_count < max_retries:
+            if hasattr(socketio.server, 'eio'):
+                socket = socketio.server.eio.sockets.get(sid)
+                if socket:
+                    break
+                retry_count += 1
+                eventlet.sleep(0.1)  # Short sleep between retries
+                
         if not socket:
             return False
             
@@ -162,6 +174,23 @@ def handle_connect():
         if not sid:
             return
             
+        # Wait briefly for socket to be fully initialized
+        max_retries = 3
+        retry_count = 0
+        socket = None
+        
+        while retry_count < max_retries:
+            if hasattr(socketio.server, 'eio'):
+                socket = socketio.server.eio.sockets.get(sid)
+                if socket:
+                    break
+                retry_count += 1
+                eventlet.sleep(0.1)  # Short sleep between retries
+                
+        if not socket:
+            logger.warning(f"No socket found for {sid} after {max_retries} retries")
+            return
+            
         # Check if socket is valid before adding
         if not is_socket_valid(sid):
             logger.warning(f"Invalid socket for {sid}")
@@ -176,6 +205,7 @@ def handle_connect():
         # Send initial stats
         try:
             emit('stats', {'status': 'connected', 'sid': sid})
+            socketio.sleep(0)  # Force immediate emission
             logger.info(f"Client connected: {sid}")
         except Exception as e:
             logger.error(f"Error sending initial stats: {e}")

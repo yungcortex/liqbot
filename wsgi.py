@@ -259,7 +259,9 @@ socketio.init_app(
     max_retries=float('inf'),
     retry_delay=1000,
     retry_delay_max=5000,
-    ping_interval_grace_period=2000
+    ping_interval_grace_period=2000,
+    async_handlers_kwargs={'async_mode': 'eventlet'},
+    engineio_logger_kwargs={'level': logging.INFO}
 )
 
 # Socket connection handler
@@ -272,32 +274,51 @@ def handle_connect():
             logger.error("No session ID found for connection")
             return
             
-        if hasattr(socketio.server, 'eio'):
-            socket = socketio.server.eio.sockets.get(sid)
-            if not socket:
-                logger.warning(f"No socket found for {sid}")
-                return
+        # Wait briefly for socket to be fully initialized
+        max_retries = 3
+        retry_count = 0
+        socket = None
+        
+        while retry_count < max_retries:
+            if hasattr(socketio.server, 'eio'):
+                socket = socketio.server.eio.sockets.get(sid)
+                if socket:
+                    break
+                retry_count += 1
+                eventlet.sleep(0.1)  # Short sleep between retries
                 
-            # Check if socket is already closed
-            if hasattr(socket, 'closed') and socket.closed:
-                logger.warning(f"Socket {sid} is already closed")
-                return
-                
-            # Check if socket is still valid
-            if hasattr(socket, 'fileno'):
-                try:
-                    if socket.fileno() == -1:
-                        logger.warning(f"Socket {sid} has invalid file descriptor")
-                        return
-                except Exception as e:
-                    logger.warning(f"Error checking socket validity: {e}")
-                    return
+        if not socket:
+            logger.warning(f"No socket found for {sid} after {max_retries} retries")
+            return
             
-            # Wrap socket with error handling
-            wrapped_socket = wrap_socket(socket)
-            if wrapped_socket:
-                socket_manager.add_socket(sid, wrapped_socket)
-                logger.info(f"New socket connection: {sid}")
+        # Check if socket is already closed
+        if hasattr(socket, 'closed') and socket.closed:
+            logger.warning(f"Socket {sid} is already closed")
+            return
+            
+        # Check if socket is still valid
+        if hasattr(socket, 'fileno'):
+            try:
+                if socket.fileno() == -1:
+                    logger.warning(f"Socket {sid} has invalid file descriptor")
+                    return
+            except Exception as e:
+                logger.warning(f"Error checking socket validity: {e}")
+                return
+        
+        # Wrap socket with error handling
+        wrapped_socket = wrap_socket(socket)
+        if wrapped_socket:
+            socket_manager.add_socket(sid, wrapped_socket)
+            logger.info(f"New socket connection: {sid}")
+            
+            # Emit initial connection success
+            try:
+                emit('connection_success', {'status': 'connected', 'sid': sid})
+                socketio.sleep(0)  # Force immediate emission
+            except Exception as e:
+                logger.error(f"Error sending connection success: {e}")
+                cleanup_socket(sid, wrapped_socket)
             
     except Exception as e:
         logger.error(f"Error in handle_connect: {e}")
