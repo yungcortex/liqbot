@@ -2,7 +2,7 @@ import eventlet
 eventlet.monkey_patch()
 
 from flask import Flask, render_template, request
-from flask_socketio import SocketIO, emit
+from flask_socketio import SocketIO, emit, disconnect
 from flask_cors import CORS
 import asyncio
 import threading
@@ -13,6 +13,7 @@ import os
 import logging
 from werkzeug.middleware.proxy_fix import ProxyFix
 import time
+import weakref
 
 # Configure logging
 logging.basicConfig(
@@ -49,7 +50,11 @@ socketio = SocketIO(
     reconnection=True,
     reconnection_attempts=float('inf'),
     reconnection_delay=1000,
-    reconnection_delay_max=5000
+    reconnection_delay_max=5000,
+    max_retries=float('inf'),
+    retry_delay=1000,
+    retry_delay_max=5000,
+    ping_interval_grace_period=1000
 )
 
 # Configure CORS with proper settings
@@ -74,8 +79,8 @@ latest_stats = {
     "SOL": {"longs": 0, "shorts": 0, "total_value": 0}
 }
 
-# Active connections tracking
-active_connections = {}
+# Active connections tracking with weak references
+active_connections = weakref.WeakValueDictionary()
 
 @app.route('/')
 def index():
@@ -88,9 +93,13 @@ def handle_connect():
         sid = request.sid
         logger.info(f"Client connected: {sid}")
         
-        # Add to active connections
+        # Add to active connections with timestamp
         if hasattr(socketio.server, 'eio'):
-            socketio.server.eio.sockets[sid].state = 'connected'
+            socket = socketio.server.eio.sockets.get(sid)
+            if socket:
+                socket.state = 'connected'
+                socket.last_heartbeat = time.time()
+                active_connections[sid] = socket
             
         # Send initial stats without broadcast
         emit('stats_update', latest_stats)
@@ -101,6 +110,7 @@ def handle_connect():
         
     except Exception as e:
         logger.error(f"Error in handle_connect: {e}")
+        cleanup_connection(sid)
         disconnect()
 
 @socketio.on('disconnect')
@@ -109,16 +119,17 @@ def handle_disconnect():
     try:
         sid = request.sid
         logger.info(f"Client disconnected: {sid}")
-        
-        # Clean up connection
         cleanup_connection(sid)
-        
     except Exception as e:
         logger.error(f"Error in handle_disconnect: {e}")
 
 def cleanup_connection(sid):
     """Clean up a client connection"""
     try:
+        # Remove from active connections
+        if sid in active_connections:
+            del active_connections[sid]
+            
         # Remove from rooms
         if hasattr(socketio.server, 'rooms'):
             rooms = socketio.server.rooms(sid, '/')
@@ -126,17 +137,20 @@ def cleanup_connection(sid):
                 for room in rooms:
                     socketio.server.leave_room(sid, room, '/')
         
-        # Remove socket state
+        # Get socket and clean up
         if hasattr(socketio.server, 'eio') and sid in socketio.server.eio.sockets:
             socket = socketio.server.eio.sockets[sid]
+            
+            # Clear socket state
             if hasattr(socket, 'state'):
                 socket.state = None
-            
+                
             # Force close if still connected
-            try:
-                socket.close(wait=False, abort=True)
-            except Exception:
-                pass
+            if hasattr(socket, 'close'):
+                try:
+                    socket.close(wait=False, abort=True)
+                except Exception:
+                    pass
                 
             # Remove from server
             del socketio.server.eio.sockets[sid]
@@ -144,37 +158,46 @@ def cleanup_connection(sid):
     except Exception as e:
         logger.error(f"Error cleaning up connection {sid}: {e}")
 
+@socketio.on('error')
+def handle_error(error):
+    """Handle socket errors"""
+    try:
+        sid = request.sid
+        logger.error(f"Socket error for {sid}: {error}")
+        cleanup_connection(sid)
+    except Exception as e:
+        logger.error(f"Error handling socket error: {e}")
+
 @socketio.on('heartbeat')
 def handle_heartbeat():
     """Handle client heartbeat"""
     try:
         sid = request.sid
-        if hasattr(socketio.server, 'eio') and sid in socketio.server.eio.sockets:
-            socket = socketio.server.eio.sockets[sid]
-            if hasattr(socket, 'last_heartbeat'):
-                socket.last_heartbeat = time.time()
+        if sid in active_connections:
+            socket = active_connections[sid]
+            socket.last_heartbeat = time.time()
     except Exception as e:
         logger.error(f"Error in handle_heartbeat: {e}")
 
 def check_connections():
     """Check for and clean up stale connections"""
     try:
-        if hasattr(socketio.server, 'eio'):
-            current_time = time.time()
-            timeout = 30  # 30 seconds timeout
-            
-            # Get copy of sockets to avoid modification during iteration
-            sockets = dict(socketio.server.eio.sockets)
-            
-            for sid, socket in sockets.items():
-                try:
-                    if hasattr(socket, 'last_heartbeat'):
-                        last_heartbeat = socket.last_heartbeat
-                        if current_time - last_heartbeat > timeout:
-                            logger.info(f"Cleaning up stale connection {sid}")
-                            cleanup_connection(sid)
-                except Exception as e:
-                    logger.error(f"Error checking connection {sid}: {e}")
+        current_time = time.time()
+        timeout = 30  # 30 seconds timeout
+        
+        # Get copy of active connections to avoid modification during iteration
+        connections = dict(active_connections)
+        
+        for sid, socket in connections.items():
+            try:
+                if hasattr(socket, 'last_heartbeat'):
+                    last_heartbeat = socket.last_heartbeat
+                    if current_time - last_heartbeat > timeout:
+                        logger.info(f"Cleaning up stale connection {sid}")
+                        cleanup_connection(sid)
+            except Exception as e:
+                logger.error(f"Error checking connection {sid}: {e}")
+                cleanup_connection(sid)
                     
     except Exception as e:
         logger.error(f"Error in check_connections: {e}")
@@ -205,15 +228,21 @@ def emit_update(data, event_type='stats_update'):
         # Check for stale connections before emitting
         check_connections()
         
-        # Emit with broadcast and force immediate send
-        socketio.emit(event_type, data, broadcast=True, namespace='/')
-        socketio.sleep(0)  # Force event emission
+        # Get list of active sids
+        active_sids = list(active_connections.keys())
+        
+        # Emit to each active connection individually
+        for sid in active_sids:
+            try:
+                socketio.emit(event_type, data, room=sid)
+                socketio.sleep(0)  # Force event emission
+            except Exception as e:
+                logger.error(f"Error emitting to {sid}: {e}")
+                cleanup_connection(sid)
         
         logger.info(f"Successfully emitted {event_type} event")
     except Exception as e:
         logger.error(f"Error emitting {event_type}: {e}")
-        # Clean up any broken connections
-        check_connections()
 
 def process_liquidation_event(data):
     """Process a liquidation event and emit it to clients"""
@@ -254,15 +283,19 @@ def process_liquidation_event(data):
         # Check for stale connections before emitting
         check_connections()
 
-        # Emit events with broadcast and force immediate send
-        try:
-            socketio.emit('liquidation', data, broadcast=True, namespace='/')
-            socketio.sleep(0)  # Force first event emission
-            socketio.emit('stats_update', latest_stats, broadcast=True, namespace='/')
-            socketio.sleep(0)  # Force second event emission
-        except Exception as e:
-            logger.error(f"Error emitting events: {e}")
-            check_connections()
+        # Get list of active sids
+        active_sids = list(active_connections.keys())
+        
+        # Emit events to each active connection individually
+        for sid in active_sids:
+            try:
+                socketio.emit('liquidation', data, room=sid)
+                socketio.sleep(0)
+                socketio.emit('stats_update', latest_stats, room=sid)
+                socketio.sleep(0)
+            except Exception as e:
+                logger.error(f"Error emitting to {sid}: {e}")
+                cleanup_connection(sid)
 
     except Exception as e:
         logger.error(f"Error processing liquidation: {e}")
@@ -300,17 +333,5 @@ if __name__ == '__main__':
         port=int(os.environ.get('PORT', 10000)),
         debug=False,
         use_reloader=False,
-        log_output=True,
-        ping_timeout=60,
-        ping_interval=25,
-        cors_allowed_origins="*",
-        websocket=True,
-        allow_upgrades=True,
-        http_compression=True,
-        max_http_buffer_size=1e6,
-        manage_session=True,
-        cookie=True,
-        cors_credentials=True,
-        verify_session=True,
-        session_lifetime=120
+        log_output=True
     ) 

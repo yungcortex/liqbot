@@ -7,6 +7,7 @@ import logging
 import signal
 import sys
 import time
+import weakref
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -17,7 +18,7 @@ eventlet.hubs.use_hub()
 
 # Global flag for graceful shutdown
 is_shutting_down = False
-active_sockets = set()
+active_sockets = weakref.WeakSet()
 
 def signal_handler(signum, frame):
     """Handle shutdown signals"""
@@ -49,7 +50,11 @@ def cleanup_sockets():
                                 socketio.server.leave_room(sid, room, '/')
                     
                     # Close socket with force
-                    socket.close(wait=False, abort=True)
+                    if hasattr(socket, 'close'):
+                        try:
+                            socket.close(wait=False, abort=True)
+                        except Exception as e:
+                            logger.error(f"Error closing socket {sid}: {e}")
                     
                     # Remove from server
                     if sid in socketio.server.eio.sockets:
@@ -108,12 +113,53 @@ socketio.init_app(
     reconnection=True,
     reconnection_attempts=float('inf'),
     reconnection_delay=1000,
-    reconnection_delay_max=5000
+    reconnection_delay_max=5000,
+    max_retries=float('inf'),
+    retry_delay=1000,
+    retry_delay_max=5000,
+    ping_interval_grace_period=1000
 )
 
 # Register cleanup function
 import atexit
 atexit.register(cleanup_sockets)
+
+def handle_error(client_address, error):
+    """Handle socket errors"""
+    logger.error(f"Socket error for client {client_address}: {error}")
+    try:
+        # Find and cleanup the affected socket
+        if hasattr(socketio, 'server') and hasattr(socketio.server, 'eio'):
+            for sid, socket in socketio.server.eio.sockets.items():
+                if hasattr(socket, 'client') and socket.client.address == client_address:
+                    cleanup_socket(sid, socket)
+                    break
+    except Exception as e:
+        logger.error(f"Error handling socket error: {e}")
+
+def cleanup_socket(sid, socket):
+    """Clean up a single socket"""
+    try:
+        logger.info(f"Cleaning up socket {sid}")
+        if hasattr(socketio.server, 'rooms'):
+            rooms = socketio.server.rooms(sid, '/')
+            if rooms:
+                for room in rooms:
+                    socketio.server.leave_room(sid, room, '/')
+        
+        if hasattr(socket, 'close'):
+            try:
+                socket.close(wait=False, abort=True)
+            except Exception:
+                pass
+            
+        if sid in socketio.server.eio.sockets:
+            del socketio.server.eio.sockets[sid]
+            
+        if hasattr(socket, 'state'):
+            socket.state = None
+    except Exception as e:
+        logger.error(f"Error cleaning up socket {sid}: {e}")
 
 # For local development
 if __name__ == '__main__':
