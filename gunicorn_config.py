@@ -45,24 +45,18 @@ def post_fork(server, worker):
     """Set up worker after fork."""
     server.log.info("Worker spawned (pid: %s)", worker.pid)
     eventlet.hubs.use_hub()
-    # Set eventlet hub debug options
-    eventlet.debug.hub_exceptions(False)
-    eventlet.debug.hub_timer_exceptions(False)
 
 def worker_int(worker):
     """Handle worker interruption signals."""
     worker.log.info("worker received INT or QUIT signal")
-    # Set hub debug options for clean shutdown
-    eventlet.debug.hub_exceptions(False)
-    eventlet.debug.hub_timer_exceptions(False)
 
 def worker_exit(server, worker):
     """Clean up after worker exit."""
     try:
-        eventlet.hub.get_hub().debug_blocking = False
-        eventlet.hub.get_hub().abort()
-        eventlet.hub.get_hub().debug_exceptions = False
-    except:
+        hub = eventlet.hubs.get_hub()
+        if hub:
+            hub.abort()
+    except Exception:
         pass
 
 # WebSocket settings

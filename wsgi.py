@@ -4,6 +4,9 @@ eventlet.monkey_patch()
 from app import app, socketio, background_tasks
 import threading
 
+# Initialize eventlet hub
+eventlet.hubs.use_hub()
+
 # Start the liquidation bot in a separate thread
 bot_thread = threading.Thread(target=background_tasks)
 bot_thread.daemon = True
