@@ -289,8 +289,8 @@ def handle_connect():
                 socket = socketio.server.eio.sockets.get(sid)
                 if socket:
                     break
-                retry_count += 1
-                eventlet.sleep(0.2)  # Longer sleep between retries
+            retry_count += 1
+            eventlet.sleep(0.2)  # Longer sleep between retries
                 
         if not socket:
             logger.error(f"No Engine.IO socket found for {sid} after {max_retries} retries")
@@ -301,37 +301,38 @@ def handle_connect():
             try:
                 # Create session and connect to namespace
                 socketio.server.manager.initialize(sid)
-                socketio.server.manager.connect(sid, '/', {})
-                
-                # Add to rooms after connection
                 socketio.server.enter_room(sid, sid, namespace='/')
+                
+                # Explicitly connect to the namespace
+                socketio.server.manager.connect(sid, '/', {})
                 logger.info(f"Socket.IO session initialized for {sid}")
+                
+                # Wrap socket with error handling
+                wrapped_socket = wrap_socket(socket)
+                if wrapped_socket:
+                    socket_manager.add_socket(sid, wrapped_socket)
+                    logger.info(f"New socket connection established: {sid}")
+                    
+                    # Emit connection success with retries
+                    max_emit_retries = 3
+                    emit_retry_count = 0
+                    while emit_retry_count < max_emit_retries:
+                        try:
+                            socketio.emit('connection_success', {'status': 'connected', 'sid': sid}, room=sid, namespace='/')
+                            eventlet.sleep(0)  # Force immediate emission
+                            return True
+                        except Exception as e:
+                            logger.error(f"Error sending connection success (attempt {emit_retry_count + 1}): {e}")
+                            emit_retry_count += 1
+                            eventlet.sleep(0.1)
+                    
+                    # If all retries failed, clean up
+                    cleanup_socket(sid, wrapped_socket)
+                    return False
+                    
             except Exception as e:
                 logger.error(f"Error initializing Socket.IO session for {sid}: {e}")
                 return False
-            
-        # Wrap socket with error handling
-        wrapped_socket = wrap_socket(socket)
-        if wrapped_socket:
-            socket_manager.add_socket(sid, wrapped_socket)
-            logger.info(f"New socket connection established: {sid}")
-            
-            # Emit connection success with retries
-            max_emit_retries = 3
-            emit_retry_count = 0
-            while emit_retry_count < max_emit_retries:
-                try:
-                    socketio.emit('connection_success', {'status': 'connected', 'sid': sid}, room=sid, namespace='/')
-                    eventlet.sleep(0)  # Force immediate emission
-                    return True
-                except Exception as e:
-                    logger.error(f"Error sending connection success (attempt {emit_retry_count + 1}): {e}")
-                    emit_retry_count += 1
-                    eventlet.sleep(0.1)
-            
-            # If all retries failed, clean up
-            cleanup_socket(sid, wrapped_socket)
-            return False
             
     except Exception as e:
         logger.error(f"Error in handle_connect: {e}")

@@ -190,8 +190,8 @@ def handle_connect():
                 socket = socketio.server.eio.sockets.get(sid)
                 if socket:
                     break
-                retry_count += 1
-                eventlet.sleep(0.2)  # Longer sleep between retries
+            retry_count += 1
+            eventlet.sleep(0.2)  # Longer sleep between retries
                 
         if not socket:
             logger.error(f"No Engine.IO socket found for {sid} after {max_retries} retries")
@@ -202,41 +202,44 @@ def handle_connect():
             try:
                 # Create session and connect to namespace
                 socketio.server.manager.initialize(sid)
-                socketio.server.manager.connect(sid, '/', {})
-                
-                # Add to rooms after connection
                 socketio.server.enter_room(sid, sid, namespace='/')
+                
+                # Explicitly connect to the namespace
+                socketio.server.manager.connect(sid, '/', {})
                 logger.info(f"Socket.IO session initialized for {sid}")
+                
+                # Add to active connections
+                with connection_lock:
+                    active_connections[sid] = {
+                        'connected_at': time.time(),
+                        'last_heartbeat': time.time(),
+                        'socket': socket
+                    }
+                    
+                # Emit initial stats with retries
+                max_emit_retries = 3
+                emit_retry_count = 0
+                while emit_retry_count < max_emit_retries:
+                    try:
+                        socketio.emit('stats_update', latest_stats, room=sid, namespace='/')
+                        eventlet.sleep(0)  # Force immediate emission
+                        logger.info(f"Client connected successfully: {sid}")
+                        return True
+                    except Exception as e:
+                        logger.error(f"Error sending initial stats (attempt {emit_retry_count + 1}): {e}")
+                        emit_retry_count += 1
+                        eventlet.sleep(0.1)
+                
+                # If all retries failed, clean up
+                with connection_lock:
+                    active_connections.pop(sid, None)
+                return False
+                
             except Exception as e:
                 logger.error(f"Error initializing Socket.IO session for {sid}: {e}")
+                with connection_lock:
+                    active_connections.pop(sid, None)
                 return False
-            
-        # Add to active connections
-        with connection_lock:
-            active_connections[sid] = {
-                'connected_at': time.time(),
-                'last_heartbeat': time.time(),
-                'socket': socket
-            }
-            
-        # Emit initial stats with retries
-        max_emit_retries = 3
-        emit_retry_count = 0
-        while emit_retry_count < max_emit_retries:
-            try:
-                socketio.emit('stats', {'status': 'connected', 'sid': sid}, room=sid, namespace='/')
-                eventlet.sleep(0)  # Force immediate emission
-                logger.info(f"Client connected successfully: {sid}")
-                return True
-            except Exception as e:
-                logger.error(f"Error sending initial stats (attempt {emit_retry_count + 1}): {e}")
-                emit_retry_count += 1
-                eventlet.sleep(0.1)
-        
-        # If all retries failed, clean up
-        with connection_lock:
-            active_connections.pop(sid, None)
-        return False
             
     except Exception as e:
         logger.error(f"Error in handle_connect: {e}")
