@@ -67,7 +67,6 @@ def wrap_socket(sock):
     # Store original methods
     _send = getattr(sock, 'send', None)
     _close = getattr(sock, 'close', None)
-    _shutdown = getattr(sock, 'shutdown', None)
     
     def safe_send(data, *args, **kwargs):
         if not _send:
@@ -93,21 +92,7 @@ def wrap_socket(sock):
             if getattr(sock, 'closed', False):
                 return
                 
-            # Skip shutdown for WebSocket connections
-            if not getattr(sock, 'upgraded', False):
-                # Only attempt shutdown if we have the method and socket is valid
-                if _shutdown:
-                    try:
-                        if hasattr(sock, 'fileno') and sock.fileno() != -1:
-                            try:
-                                _shutdown(socket.SHUT_RDWR)
-                            except Exception as e:
-                                if not isinstance(e, OSError) or e.errno != errno.ENOTCONN:
-                                    logger.warning(f"Error during socket shutdown: {e}")
-                    except Exception:
-                        pass
-            
-            # Close the socket
+            # Just close the socket without shutdown
             try:
                 _close()
             except Exception as e:
@@ -157,20 +142,7 @@ def cleanup_socket(sid, socket):
         # Close socket safely
         if hasattr(socket, 'close'):
             try:
-                # Skip shutdown for WebSocket connections
-                if not getattr(socket, 'upgraded', False):
-                    # Check if socket is still valid before attempting shutdown
-                    if hasattr(socket, 'shutdown') and hasattr(socket, 'fileno'):
-                        try:
-                            if socket.fileno() != -1:
-                                try:
-                                    socket.shutdown(socket.SHUT_RDWR)
-                                except Exception as e:
-                                    handle_socket_error(socket, e)
-                        except Exception:
-                            pass
-                
-                # Close the socket
+                # Just close the socket without shutdown
                 socket.close()
             except Exception as e:
                 handle_socket_error(socket, e)
@@ -289,10 +261,10 @@ socketio.init_app(
     async_handlers_kwargs={'async_mode': 'eventlet'},
     engineio_logger_kwargs={'level': logging.INFO},
     namespace='/',
-    allow_upgrades=True,  # Re-enable upgrades
+    allow_upgrades=True,
     initial_packet_timeout=20,
     connect_timeout=20,
-    upgrades=['websocket'],  # Allow WebSocket upgrades
+    upgrades=['websocket'],
     allow_reconnection=True,
     json=True,
     handle_sigint=False,
@@ -301,7 +273,8 @@ socketio.init_app(
     max_decode_packets=50,
     max_encode_packets=50,
     http_compression=True,
-    compression_threshold=1024
+    compression_threshold=1024,
+    websocket_class=websocket.WebSocket  # Use eventlet's WebSocket class
 )
 
 # Socket connection handler
@@ -347,10 +320,6 @@ def handle_connect():
                 
                 # Enter room after connection is established
                 socketio.server.enter_room(sid, sid, namespace='/')
-                
-                # Mark socket as upgraded if it's a WebSocket
-                if isinstance(socket, websocket.WebSocket):
-                    socket.upgraded = True
                 
                 # Wrap socket with error handling
                 wrapped_socket = wrap_socket(socket)
