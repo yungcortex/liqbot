@@ -8,13 +8,13 @@ bind = "0.0.0.0:" + str(os.getenv("PORT", "10000"))
 backlog = 2048
 
 # Worker processes
-workers = 1  # Single worker to avoid session conflicts
+workers = 1
 worker_class = "eventlet"
 worker_connections = 1000
 
 # Timeouts
-timeout = 300
-keepalive = 2
+timeout = 120
+keepalive = 5
 
 # Logging
 accesslog = "-"
@@ -26,8 +26,9 @@ keyfile = None
 certfile = None
 
 # Security
-limit_request_line = 0
-limit_request_fields = 0
+limit_request_line = 4094
+limit_request_fields = 100
+limit_request_field_size = 8190
 
 # Process naming
 proc_name = None
@@ -44,10 +45,16 @@ def post_fork(server, worker):
     """Set up worker after fork."""
     server.log.info("Worker spawned (pid: %s)", worker.pid)
     eventlet.hubs.use_hub()
+    # Set eventlet hub debug options
+    eventlet.debug.hub_exceptions(False)
+    eventlet.debug.hub_timer_exceptions(False)
 
-def on_exit(server):
-    """Clean up on exit."""
-    server.log.info("Shutting down")
+def worker_int(worker):
+    """Handle worker interruption signals."""
+    worker.log.info("worker received INT or QUIT signal")
+    # Set hub debug options for clean shutdown
+    eventlet.debug.hub_exceptions(False)
+    eventlet.debug.hub_timer_exceptions(False)
 
 def worker_exit(server, worker):
     """Clean up after worker exit."""
@@ -59,9 +66,9 @@ def worker_exit(server, worker):
         pass
 
 # WebSocket settings
-websocket_max_message_size = 16 * 1024 * 1024  # 16MB
-websocket_ping_interval = 25
-websocket_ping_timeout = 60
+websocket_max_message_size = 1024 * 1024  # 1MB
+websocket_ping_interval = 10
+websocket_ping_timeout = 30
 websocket_per_message_deflate = True
 
 # Environment settings
@@ -72,27 +79,18 @@ raw_env = [
 # Preload app
 preload_app = True
 
-# Disable request line length check
-limit_request_line = 0
-
-# Increase max request fields
-limit_request_fields = 0
-limit_request_field_size = 0
-
-# Enable keep-alive
-keepalive = 5
-
-# Set buffer size
+# Buffer size
 buffer_size = 65535
 
-def worker_int(worker):
-    """Handle worker interruption signals."""
-    worker.log.info("worker received INT or QUIT signal")
-
-# WebSocket specific settings
+# Worker class args
 worker_class_args = {
-    'worker_connections': 2000,
-    'websocket_max_message_size': 16 * 1024 * 1024,  # 16MB
-    'websocket_ping_interval': 25,  # Send ping every 25 seconds
-    'websocket_ping_timeout': 120  # Wait 120 seconds for pong response
+    'worker_connections': 1000,
+    'websocket_max_message_size': 1024 * 1024,  # 1MB
+    'websocket_ping_interval': 10,
+    'websocket_ping_timeout': 30,
+    'websocket_per_message_deflate': True,
+    'keepalive': 5,
+    'client_timeout': 60,
+    'proxy_protocol': False,
+    'proxy_allow_ips': '*'
 } 

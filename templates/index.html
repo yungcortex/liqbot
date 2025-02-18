@@ -218,62 +218,60 @@
     </div>
 
     <script>
-        // Socket.IO connection
+        // Socket.IO connection with improved error handling
         const socket = io('https://liqbot-038f.onrender.com', {
             transports: ['websocket'],
             reconnection: true,
             reconnectionDelay: 1000,
             reconnectionDelayMax: 5000,
-            reconnectionAttempts: 3,
-            timeout: 60000,
+            reconnectionAttempts: 5,
+            timeout: 20000,
             autoConnect: true,
             forceNew: true,
             secure: true,
             rejectUnauthorized: false,
-            withCredentials: false
+            withCredentials: false,
+            upgrade: true,
+            rememberUpgrade: true,
+            path: '/socket.io/',
+            query: {},
+            extraHeaders: {},
+            timestampRequests: true,
+            timestampParam: 't',
+            closeOnBeforeunload: false
         });
 
-        // Create a heartbeat mechanism
-        let heartbeatInterval;
-        let missedHeartbeats = 0;
-        const MAX_MISSED_HEARTBEATS = 3;
+        // Connection state tracking
+        let isConnecting = false;
+        let reconnectTimer = null;
 
-        function startHeartbeat() {
-            clearInterval(heartbeatInterval);
-            missedHeartbeats = 0;
-            
-            heartbeatInterval = setInterval(() => {
-                if (socket.connected) {
-                    missedHeartbeats++;
-                    socket.emit('heartbeat', () => {
-                        missedHeartbeats--;
-                    });
-                    
-                    if (missedHeartbeats >= MAX_MISSED_HEARTBEATS) {
-                        console.log('Too many missed heartbeats, reconnecting...');
-                        socket.disconnect();
-                        setTimeout(() => socket.connect(), 1000);
-                    }
-                }
-            }, 15000);
-        }
-
-        const feed = document.getElementById('liquidation-feed');
-        
+        // Connection event handlers with improved error handling
         socket.on('connect', () => {
             console.log('Connected to server');
             document.getElementById('connection-status').textContent = 'Connected';
             document.getElementById('connection-status').style.color = 'green';
-            feed.innerHTML = '<div class="terminal-line">Connected to liquidation feed</div>';
-            socket.emit('get_stats');
-            startHeartbeat();
+            isConnecting = false;
+            if (reconnectTimer) {
+                clearTimeout(reconnectTimer);
+                reconnectTimer = null;
+            }
         });
 
         socket.on('connect_error', (error) => {
             console.error('Connection error:', error);
             document.getElementById('connection-status').textContent = 'Connection Error';
             document.getElementById('connection-status').style.color = 'red';
-            feed.innerHTML += '<div class="terminal-line">Connection error. Retrying...</div>';
+            
+            if (!isConnecting && !reconnectTimer) {
+                isConnecting = true;
+                reconnectTimer = setTimeout(() => {
+                    isConnecting = false;
+                    reconnectTimer = null;
+                    if (!socket.connected) {
+                        socket.connect();
+                    }
+                }, 5000);
+            }
         });
 
         socket.on('disconnect', (reason) => {
@@ -281,28 +279,62 @@
             document.getElementById('connection-status').textContent = 'Disconnected';
             document.getElementById('connection-status').style.color = 'red';
             
-            // Only attempt to reconnect if not already reconnecting
-            if (!socket.reconnecting && reason !== 'io server disconnect') {
-                socket.connect();
+            if (!isConnecting && !reconnectTimer && reason !== 'io server disconnect' && reason !== 'io client disconnect') {
+                isConnecting = true;
+                reconnectTimer = setTimeout(() => {
+                    isConnecting = false;
+                    reconnectTimer = null;
+                    if (!socket.connected) {
+                        socket.connect();
+                    }
+                }, 5000);
             }
         });
 
-        socket.on('error', (error) => {
-            console.error('Socket error:', error);
-            feed.innerHTML += `<div class="terminal-line">Socket error: ${error}</div>`;
+        // Heartbeat mechanism
+        let heartbeatInterval = null;
+        let missedHeartbeats = 0;
+        const MAX_MISSED_HEARTBEATS = 3;
+
+        function startHeartbeat() {
+            if (heartbeatInterval) {
+                clearInterval(heartbeatInterval);
+            }
+            missedHeartbeats = 0;
+            
+            heartbeatInterval = setInterval(() => {
+                if (socket.connected) {
+                    missedHeartbeats++;
+                    socket.emit('heartbeat', () => {
+                        missedHeartbeats = 0;
+                    });
+                    
+                    if (missedHeartbeats >= MAX_MISSED_HEARTBEATS) {
+                        console.log('Too many missed heartbeats, reconnecting...');
+                        socket.disconnect();
+                        setTimeout(() => {
+                            if (!socket.connected) {
+                                socket.connect();
+                            }
+                        }, 1000);
+                    }
+                }
+            }, 10000);
+        }
+
+        // Start heartbeat on connect
+        socket.on('connect', startHeartbeat);
+
+        // Clean up on disconnect
+        socket.on('disconnect', () => {
+            if (heartbeatInterval) {
+                clearInterval(heartbeatInterval);
+                heartbeatInterval = null;
+            }
         });
 
-        socket.io.on('reconnect_attempt', (attempt) => {
-            console.log('Attempting to reconnect:', attempt);
-            feed.innerHTML += `<div class="terminal-line">Reconnection attempt ${attempt}...</div>`;
-        });
-
-        socket.io.on('reconnect', (attempt) => {
-            console.log('Reconnected on attempt:', attempt);
-            feed.innerHTML += `<div class="terminal-line">Reconnected after ${attempt} attempts</div>`;
-            socket.emit('get_stats');
-        });
-
+        const feed = document.getElementById('liquidation-feed');
+        
         socket.on('stats_update', (data) => {
             console.log('Stats update:', data);
             for (const [symbol, stats] of Object.entries(data)) {
@@ -325,10 +357,6 @@
                 </div>
             `;
             feed.innerHTML = line + feed.innerHTML;
-        });
-
-        socket.on('heartbeat_response', () => {
-            missedHeartbeats = 0;
         });
 
         function formatNumber(num) {

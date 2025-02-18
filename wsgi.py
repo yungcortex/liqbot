@@ -23,10 +23,19 @@ socketio.init_app(
     manage_session=False,
     message_queue=None,
     always_connect=True,
-    transports=['websocket', 'polling'],
+    transports=['websocket'],
     cookie=False,
     logger=True,
-    engineio_logger=True
+    engineio_logger=True,
+    async_handlers=False,
+    monitor_clients=False,
+    upgrade_timeout=15000,
+    max_http_buffer_size=1e6,
+    websocket_ping_interval=10,
+    websocket_ping_timeout=30,
+    websocket_max_message_size=1e6,
+    cors_credentials=False,
+    cors_headers=['Content-Type']
 )
 
 # For local development
