@@ -45,14 +45,14 @@ socketio = SocketIO(
     async_mode='eventlet',
     logger=False,
     engineio_logger=False,
-    ping_timeout=30,
-    ping_interval=15,
+    ping_timeout=20,
+    ping_interval=10,
     max_http_buffer_size=1e6,
-    manage_session=True,
-    cookie=False,
+    manage_session=False,
+    cookie=None,
     always_connect=True,
-    transports=['websocket', 'polling'],
-    upgrade_timeout=10000,
+    transports=['websocket'],
+    upgrade_timeout=5000,
     max_queue_size=100,
     json=json
 )
@@ -79,7 +79,7 @@ def handle_connect():
         sid = request.sid
         transport = request.environ.get('wsgi.url_scheme', 'unknown')
         logger.info(f"Client connected - SID: {sid}, Transport: {transport}")
-        socketio.emit('stats_update', latest_stats, room=sid)
+        emit('stats_update', latest_stats, room=sid)
     except Exception as e:
         logger.error(f"Error in handle_connect: {e}")
 
@@ -92,14 +92,14 @@ def handle_disconnect():
     except Exception as e:
         logger.error(f"Error in handle_disconnect: {e}")
 
-@socketio.on('error')
-def handle_error(error):
-    """Handle Socket.IO errors"""
+@socketio.on_error_default
+def default_error_handler(e):
+    """Handle all Socket.IO errors"""
     try:
-        sid = request.sid
-        logger.error(f"Socket.IO error for SID {sid}: {error}")
-    except Exception as e:
-        logger.error(f"Error in handle_error: {e}")
+        sid = request.sid if hasattr(request, 'sid') else 'Unknown'
+        logger.error(f"Socket.IO error for SID {sid}: {str(e)}")
+    except Exception as error:
+        logger.error(f"Error in error handler: {error}")
 
 @socketio.on('heartbeat')
 def handle_heartbeat():
