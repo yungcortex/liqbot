@@ -179,52 +179,34 @@ application.wsgi_app = socket_middleware(application.wsgi_app)
 socketio.init_app(
     app,
     async_mode='eventlet',
-    cors_allowed_origins=["https://liqbot-038f.onrender.com"],
-    ping_timeout=20000,
-    ping_interval=10000,
-    manage_session=False,
+    cors_allowed_origins=["*"],  # Allow all origins temporarily for testing
+    ping_timeout=5000,
+    ping_interval=2500,
+    manage_session=True,
     message_queue=None,
     always_connect=True,
-    transports=['websocket'],
+    transports=['websocket', 'polling'],  # Enable both transports
     cookie=None,
     logger=True,
     engineio_logger=True,
     async_handlers=True,
-    monitor_clients=False,
-    upgrade_timeout=20000,
+    monitor_clients=True,
+    upgrade_timeout=5000,
     max_http_buffer_size=1024 * 1024,
-    websocket_ping_interval=10000,
-    websocket_ping_timeout=20000,
-    websocket_max_message_size=1024 * 1024,
-    cors_credentials=False,
-    cors_headers=['Content-Type'],
-    cors_allowed_methods=['GET', 'POST', 'OPTIONS'],
-    close_timeout=20000,
+    websocket_ping_interval=2500,
+    websocket_ping_timeout=5000,
+    cors_credentials=True,
+    cors_headers=['Content-Type', 'X-Requested-With'],
+    close_timeout=5000,
     max_queue_size=100,
     reconnection=True,
     reconnection_attempts=float('inf'),
     reconnection_delay=1000,
-    reconnection_delay_max=10000,
+    reconnection_delay_max=5000,
     max_retries=float('inf'),
     retry_delay=1000,
-    retry_delay_max=10000,
-    ping_interval_grace_period=5000,
-    async_handlers_kwargs={'async_mode': 'eventlet'},
-    engineio_logger_kwargs={'level': logging.INFO},
-    namespace='/',
-    allow_upgrades=False,
-    initial_packet_timeout=20,
-    connect_timeout=20,
-    upgrades=[],
-    allow_reconnection=True,
-    json=True,
-    handle_sigint=False,
-    max_buffer_size=1024 * 1024,
-    always_connect_same_sid=False,
-    max_decode_packets=50,
-    max_encode_packets=50,
-    http_compression=True,
-    compression_threshold=1024
+    retry_delay_max=5000,
+    ping_interval_grace_period=1000
 )
 
 # Socket connection handler
@@ -264,6 +246,17 @@ def handle_connect():
             }
             
         logger.info(f"New socket connection established: {sid}")
+        
+        # Emit initial connection success
+        socketio.emit('connection_status', {'status': 'connected'}, room=sid)
+        
+        # Emit initial data
+        socketio.emit('initial_data', {
+            'bitcoin': {'long_liqs': 0, 'short_liqs': 0, 'total_value': 0},
+            'ethereum': {'long_liqs': 0, 'short_liqs': 0, 'total_value': 0},
+            'solana': {'long_liqs': 0, 'short_liqs': 0, 'total_value': 0}
+        }, room=sid)
+        
         return True
             
     except Exception as e:
@@ -283,6 +276,19 @@ def handle_disconnect():
             cleanup_socket(sid, socket)
     except Exception as e:
         logger.error(f"Error in handle_disconnect: {e}")
+
+# Add heartbeat handler
+@socketio.on('heartbeat')
+def handle_heartbeat():
+    """Handle client heartbeat"""
+    try:
+        sid = request.sid
+        if sid in active_connections:
+            with connection_lock:
+                active_connections[sid]['last_heartbeat'] = time.time()
+            socketio.emit('heartbeat_response', {'status': 'alive'}, room=sid)
+    except Exception as e:
+        logger.error(f"Error in handle_heartbeat: {e}")
 
 # Register cleanup function
 import atexit
