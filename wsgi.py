@@ -22,12 +22,12 @@ eventlet.hubs.use_hub()
 
 # Global state
 is_shutting_down = False
-connection_pool = weakref.WeakValueDictionary()
-socket_pool = weakref.WeakValueDictionary()
+active_connections = {}
+connection_lock = threading.Lock()
 
 class SocketManager:
     def __init__(self):
-        self.sockets = weakref.WeakValueDictionary()
+        self.sockets = {}
         self.lock = threading.Lock()
         
     def add_socket(self, sid, socket):
@@ -69,10 +69,8 @@ def wrap_socket(sock):
     _close = getattr(sock, 'close', None)
     
     def safe_send(data, *args, **kwargs):
-        if not _send:
-            return 0
         try:
-            if getattr(sock, 'closed', False):
+            if not _send or getattr(sock, 'closed', False):
                 return 0
             return _send(data, *args, **kwargs)
         except Exception as e:
@@ -80,10 +78,8 @@ def wrap_socket(sock):
             return 0
             
     def safe_close(*args, **kwargs):
-        if not _close:
-            return
         try:
-            if getattr(sock, 'closed', False):
+            if not _close or getattr(sock, 'closed', False):
                 return
             _close()
         except Exception as e:
@@ -105,17 +101,14 @@ def cleanup_socket(sid, socket):
         # Remove from socket manager first
         socket_manager.remove_socket(sid)
         
-        if not socket:
-            return
-            
-        # Check if socket is already closed
-        if getattr(socket, 'closed', False):
-            return
-            
-        # Close socket safely
-        if hasattr(socket, 'close'):
+        # Remove from active connections
+        with connection_lock:
+            active_connections.pop(sid, None)
+        
+        if socket:
             try:
-                socket.close()
+                if not getattr(socket, 'closed', False):
+                    socket.close()
             except Exception as e:
                 logger.error(f"Error closing socket: {e}")
                 
@@ -182,12 +175,12 @@ def socket_middleware(wsgi_app):
 # Apply middleware
 application.wsgi_app = socket_middleware(application.wsgi_app)
 
-# Initialize Socket.IO with improved timeout settings
+# Initialize Socket.IO with improved settings
 socketio.init_app(
     app,
     async_mode='eventlet',
     cors_allowed_origins=["https://liqbot-038f.onrender.com"],
-    ping_timeout=5000,
+    ping_timeout=20000,
     ping_interval=10000,
     manage_session=False,
     message_queue=None,
@@ -198,15 +191,15 @@ socketio.init_app(
     engineio_logger=True,
     async_handlers=True,
     monitor_clients=False,
-    upgrade_timeout=10000,
+    upgrade_timeout=20000,
     max_http_buffer_size=1024 * 1024,
     websocket_ping_interval=10000,
-    websocket_ping_timeout=5000,
+    websocket_ping_timeout=20000,
     websocket_max_message_size=1024 * 1024,
     cors_credentials=False,
     cors_headers=['Content-Type'],
     cors_allowed_methods=['GET', 'POST', 'OPTIONS'],
-    close_timeout=10000,
+    close_timeout=20000,
     max_queue_size=100,
     reconnection=True,
     reconnection_attempts=float('inf'),
@@ -215,7 +208,7 @@ socketio.init_app(
     max_retries=float('inf'),
     retry_delay=1000,
     retry_delay_max=10000,
-    ping_interval_grace_period=2000,
+    ping_interval_grace_period=5000,
     async_handlers_kwargs={'async_mode': 'eventlet'},
     engineio_logger_kwargs={'level': logging.INFO},
     namespace='/',
@@ -244,56 +237,40 @@ def handle_connect():
             logger.error("No session ID found for connection")
             return False
             
-        # Initialize Socket.IO session
-        if hasattr(socketio.server, 'manager'):
-            try:
-                # Create session
-                socketio.server.manager.initialize()
-                
-                # Get the Engine.IO socket
-                socket = socketio.server.eio.sockets.get(sid)
-                if not socket:
-                    logger.error(f"No Engine.IO socket found for {sid}")
-                    return False
-                
-                # Add to active connections
-                with connection_lock:
-                    active_connections[sid] = {
-                        'connected_at': time.time(),
-                        'last_heartbeat': time.time(),
-                        'socket': socket
-                    }
-                    
-                # Wrap socket with error handling
-                wrapped_socket = wrap_socket(socket)
-                if wrapped_socket:
-                    socket_manager.add_socket(sid, wrapped_socket)
-                    logger.info(f"New socket connection established: {sid}")
-                    
-                    # Emit connection success immediately
-                    try:
-                        socketio.emit('connection_success', 
-                                    {'status': 'connected', 'sid': sid}, 
-                                    room=sid, 
-                                    namespace='/')
-                        return True
-                    except Exception as e:
-                        logger.error(f"Error emitting connection success: {e}")
-                        cleanup_socket(sid, wrapped_socket)
-                        return False
-                    
-            except Exception as e:
-                logger.error(f"Error initializing Socket.IO session for {sid}: {e}")
-                cleanup_socket(sid, socket)
-                return False
+        # Get the Engine.IO socket
+        socket = None
+        if hasattr(socketio.server, 'eio'):
+            socket = socketio.server.eio.sockets.get(sid)
+            
+        if not socket:
+            logger.error(f"No Engine.IO socket found for {sid}")
+            return False
+            
+        # Wrap socket with error handling
+        wrapped_socket = wrap_socket(socket)
+        if not wrapped_socket:
+            logger.error(f"Failed to wrap socket for {sid}")
+            return False
+            
+        # Add to socket manager
+        socket_manager.add_socket(sid, wrapped_socket)
+        
+        # Add to active connections
+        with connection_lock:
+            active_connections[sid] = {
+                'connected_at': time.time(),
+                'last_heartbeat': time.time(),
+                'socket': wrapped_socket
+            }
+            
+        logger.info(f"New socket connection established: {sid}")
+        return True
             
     except Exception as e:
         logger.error(f"Error in handle_connect: {e}")
         if 'sid' in locals() and 'socket' in locals():
             cleanup_socket(sid, socket)
         return False
-    
-    return False
 
 @socketio.on('disconnect')
 def handle_disconnect():
@@ -302,9 +279,8 @@ def handle_disconnect():
         sid = request.sid
         if sid:
             logger.info(f"Client disconnecting: {sid}")
-            cleanup_socket(sid, socketio.server.eio.sockets.get(sid))
-            with connection_lock:
-                active_connections.pop(sid, None)
+            socket = socket_manager.get_socket(sid)
+            cleanup_socket(sid, socket)
     except Exception as e:
         logger.error(f"Error in handle_disconnect: {e}")
 
