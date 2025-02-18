@@ -4,13 +4,47 @@ eventlet.monkey_patch()
 from app import app, socketio, background_tasks
 import threading
 import logging
+import signal
+import sys
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Initialize eventlet hub
+# Initialize eventlet hub before anything else
 eventlet.hubs.use_hub()
+
+# Global flag for graceful shutdown
+is_shutting_down = False
+
+def signal_handler(signum, frame):
+    """Handle shutdown signals"""
+    global is_shutting_down
+    logger.info(f"Received signal {signum}. Starting graceful shutdown...")
+    is_shutting_down = True
+    cleanup_sockets()
+    sys.exit(0)
+
+# Register signal handlers
+signal.signal(signal.SIGTERM, signal_handler)
+signal.signal(signal.SIGINT, signal_handler)
+
+def cleanup_sockets():
+    """Clean up any remaining socket connections"""
+    try:
+        logger.info("Starting socket cleanup...")
+        if hasattr(socketio, 'server') and hasattr(socketio.server, 'eio'):
+            for sid in list(socketio.server.eio.sockets.keys()):
+                try:
+                    logger.info(f"Cleaning up socket {sid}")
+                    socket = socketio.server.eio.sockets[sid]
+                    socket.close(wait=False, abort=True)
+                    del socketio.server.eio.sockets[sid]
+                except Exception as e:
+                    logger.error(f"Error cleaning up socket {sid}: {e}")
+        logger.info("Socket cleanup completed")
+    except Exception as e:
+        logger.error(f"Error in socket cleanup: {e}")
 
 # Start the liquidation bot in a separate thread
 bot_thread = threading.Thread(target=background_tasks)
@@ -25,8 +59,8 @@ socketio.init_app(
     app,
     async_mode='eventlet',
     cors_allowed_origins=["https://liqbot-038f.onrender.com"],
-    ping_timeout=30,
-    ping_interval=15,
+    ping_timeout=20,
+    ping_interval=10,
     manage_session=True,
     message_queue=None,
     always_connect=True,
@@ -36,26 +70,17 @@ socketio.init_app(
     engineio_logger=True,
     async_handlers=True,
     monitor_clients=True,
-    upgrade_timeout=10000,
+    upgrade_timeout=5000,
     max_http_buffer_size=1024 * 1024,  # 1MB
     websocket_ping_interval=5,
     websocket_ping_timeout=10,
     websocket_max_message_size=1024 * 1024,  # 1MB
     cors_credentials=False,
     cors_headers=['Content-Type'],
-    close_timeout=10
+    close_timeout=5,
+    max_queue_size=10,
+    async_mode_client='eventlet'
 )
-
-def cleanup_sockets():
-    """Clean up any remaining socket connections"""
-    try:
-        for sid in socketio.server.eio.sockets:
-            try:
-                socketio.server.disconnect(sid, namespace='/')
-            except Exception as e:
-                logger.error(f"Error cleaning up socket {sid}: {e}")
-    except Exception as e:
-        logger.error(f"Error in socket cleanup: {e}")
 
 # Register cleanup function
 import atexit
@@ -63,6 +88,17 @@ atexit.register(cleanup_sockets)
 
 # For local development
 if __name__ == '__main__':
+    try:
+        socketio.run(
+            app,
+            host='0.0.0.0',
+            port=10000,
+            debug=False,
+            use_reloader=False,
+            log_output=True
+        )
+    except KeyboardInterrupt:
+        logger.info("Received KeyboardInterrupt. Starting cleanup...")
     socketio.run(
         app,
         host='0.0.0.0',
