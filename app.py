@@ -32,7 +32,7 @@ app.config['PROPAGATE_EXCEPTIONS'] = True
 # Initialize SocketIO with optimized settings
 socketio = SocketIO(
     app,
-    cors_allowed_origins="*",
+    cors_allowed_origins=["https://liqbot-038f.onrender.com"],
     async_mode='eventlet',
     logger=True,
     engineio_logger=True,
@@ -60,11 +60,12 @@ socketio = SocketIO(
 # Configure CORS with proper settings
 CORS(app, resources={
     r"/*": {
-        "origins": "*",
+        "origins": ["https://liqbot-038f.onrender.com"],
         "methods": ["GET", "POST", "OPTIONS"],
-        "allow_headers": ["*"],
+        "allow_headers": ["Content-Type", "X-Requested-With", "Authorization"],
         "supports_credentials": True,
-        "max_age": 3600
+        "max_age": 3600,
+        "expose_headers": ["Content-Length", "Content-Type"]
     }
 })
 
@@ -207,11 +208,16 @@ if __name__ == '__main__':
         debug=False,
         use_reloader=False,
         log_output=True,
-        ping_timeout=20,
-        ping_interval=10,
+        ping_timeout=60,
+        ping_interval=25,
         cors_allowed_origins="*",
-        websocket=False,
-        allow_upgrades=False,
+        websocket=True,
+        allow_upgrades=True,
         http_compression=True,
-        max_http_buffer_size=1e6
+        max_http_buffer_size=1e6,
+        manage_session=True,
+        cookie=True,
+        cors_credentials=True,
+        verify_session=True,
+        session_lifetime=120
     ) 
