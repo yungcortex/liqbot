@@ -130,53 +130,47 @@ def emit_update(data, event_type='stats_update'):
 def process_liquidation_event(data):
     """Process a liquidation event and emit it to clients"""
     try:
-        if isinstance(data, dict):
-            liquidation_data = data.get('data', data)
-        else:
+        if not isinstance(data, dict):
             logger.error(f"Invalid data format received: {data}")
             return
-            
-        symbol = liquidation_data.get('symbol', '').replace('USDT', '')
-        
-        try:
-            amount = float(liquidation_data.get('size', liquidation_data.get('qty', 0)))
-            price = float(liquidation_data.get('price', 0))
-            value = amount * price
-        except (ValueError, TypeError):
-            logger.error(f"Error converting size/price: {liquidation_data}")
+
+        symbol = data.get('symbol')
+        if not symbol or symbol not in latest_stats:
+            logger.error(f"Invalid symbol in data: {data}")
             return
-        
-        side = 'LONG' if liquidation_data.get('side', '').upper() == 'BUY' else 'SHORT'
-        
-        if symbol in latest_stats:
-            if side == 'LONG':
-                latest_stats[symbol]['longs'] += 1
-            else:
-                latest_stats[symbol]['shorts'] += 1
-            latest_stats[symbol]['total_value'] += value
-            
-            liquidation_event = {
-                'symbol': symbol,
-                'side': side,
-                'amount': amount,
-                'price': price,
-                'value': value,
-                'timestamp': liquidation_data.get('updatedTime', datetime.now().timestamp())
-            }
-            
-            # Log the event before emitting
-            logger.info(f"Emitting liquidation event: {liquidation_event}")
-            logger.info(f"Current stats: {latest_stats}")
-            
-            # Emit events with namespace and room specification
-            socketio.emit('liquidation', liquidation_event, namespace='/', broadcast=True)
-            socketio.emit('stats_update', latest_stats, namespace='/', broadcast=True)
-            
-            # Force a flush of the socket
-            try:
-                socketio.sleep(0)
-            except Exception as e:
-                logger.error(f"Error in socket flush: {e}")
+
+        side = data.get('side')
+        if not side or side not in ['LONG', 'SHORT']:
+            logger.error(f"Invalid side in data: {data}")
+            return
+
+        try:
+            amount = float(data.get('amount', 0))
+            price = float(data.get('price', 0))
+            value = float(data.get('value', 0))
+        except (ValueError, TypeError):
+            logger.error(f"Error converting numeric values: {data}")
+            return
+
+        # Update stats
+        if side == 'LONG':
+            latest_stats[symbol]['longs'] += 1
+        else:
+            latest_stats[symbol]['shorts'] += 1
+        latest_stats[symbol]['total_value'] += value
+
+        # Log the event before emitting
+        logger.info(f"Emitting liquidation event: {data}")
+        logger.info(f"Current stats: {latest_stats}")
+
+        # Emit events with broadcast
+        try:
+            socketio.emit('liquidation', data, broadcast=True)
+            socketio.emit('stats_update', latest_stats, broadcast=True)
+            socketio.sleep(0)  # Force event emission
+        except Exception as e:
+            logger.error(f"Error emitting events: {e}")
+
     except Exception as e:
         logger.error(f"Error processing liquidation: {e}")
 
