@@ -106,7 +106,7 @@ socketio.init_app(
     max_queue_size=10,
     async_mode_client='eventlet',
     reconnection=True,
-    reconnection_attempts=Infinity,
+    reconnection_attempts=float('inf'),
     reconnection_delay=1000,
     reconnection_delay_max=5000
 )

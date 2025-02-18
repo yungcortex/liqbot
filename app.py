@@ -37,15 +37,19 @@ socketio = SocketIO(
     async_mode='eventlet',
     logger=True,
     engineio_logger=True,
-    ping_timeout=20,
-    ping_interval=10,
+    ping_timeout=15,
+    ping_interval=5,
     manage_session=True,
     cookie=False,
     always_connect=True,
     transports=['websocket'],
     max_http_buffer_size=1024 * 1024,  # 1MB
     async_handlers=True,
-    monitor_clients=True
+    monitor_clients=True,
+    reconnection=True,
+    reconnection_attempts=float('inf'),
+    reconnection_delay=1000,
+    reconnection_delay_max=5000
 )
 
 # Configure CORS with proper settings
