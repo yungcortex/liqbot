@@ -52,14 +52,11 @@ socket_manager = SocketManager()
 def handle_socket_error(socket, e):
     """Handle socket errors gracefully"""
     if isinstance(e, (IOError, OSError)):
-        if e.errno == errno.EBADF:
-            # Bad file descriptor - socket was closed
-            logger.warning(f"Socket was already closed: {e}")
+        error_code = getattr(e, 'errno', None)
+        if error_code in (errno.EBADF, errno.EPIPE, errno.ENOTCONN, errno.ESHUTDOWN):
+            logger.warning(f"Expected socket error: {e}")
             return True
-        elif e.errno in (errno.EPIPE, errno.ENOTCONN, errno.ESHUTDOWN):
-            # Connection broken, not connected, or already shut down
-            logger.warning(f"Socket connection error: {e}")
-            return True
+        logger.error(f"Unexpected socket error: {e}")
     return False
 
 def wrap_socket(sock):
@@ -103,26 +100,30 @@ def cleanup_socket(sid, socket):
         # Remove from socket manager first
         socket_manager.remove_socket(sid)
         
+        if not socket:
+            logger.warning(f"Socket {sid} already removed")
+            return
+            
         # Remove from rooms
         if hasattr(socketio.server, 'rooms'):
             try:
-                rooms = socketio.server.rooms(sid, '/')
-                if rooms:
-                    for room in rooms:
-                        try:
-                            socketio.server.leave_room(sid, room, '/')
-                        except Exception as e:
-                            logger.warning(f"Error removing from room {room}: {e}")
+                rooms = list(socketio.server.rooms(sid, '/'))
+                for room in rooms:
+                    try:
+                        socketio.server.leave_room(sid, room, '/')
+                    except Exception as e:
+                        logger.warning(f"Error removing from room {room}: {e}")
             except Exception as e:
                 logger.warning(f"Error getting rooms for {sid}: {e}")
         
         # Close socket safely
-        if socket and hasattr(socket, 'close'):
+        if hasattr(socket, 'close'):
             try:
-                # Try to shutdown the socket first
-                if hasattr(socket, 'shutdown'):
+                # Try to shutdown the socket first if it's still connected
+                if hasattr(socket, 'shutdown') and hasattr(socket, 'fileno'):
                     try:
-                        socket.shutdown(socket.SHUT_RDWR)
+                        if socket.fileno() != -1:  # Check if socket is still valid
+                            socket.shutdown(socket.SHUT_RDWR)
                     except Exception as e:
                         handle_socket_error(socket, e)
                 
@@ -241,15 +242,36 @@ def handle_connect():
     """Handle new socket connections"""
     try:
         sid = request.sid
+        if not sid:
+            logger.error("No session ID found for connection")
+            return
+            
         if hasattr(socketio.server, 'eio'):
             socket = socketio.server.eio.sockets.get(sid)
             if socket:
+                # Check if socket is already closed
+                if hasattr(socket, 'closed') and socket.closed:
+                    logger.warning(f"Socket {sid} is already closed")
+                    return
+                    
+                # Check if socket is still valid
+                if hasattr(socket, 'fileno'):
+                    try:
+                        if socket.fileno() == -1:
+                            logger.warning(f"Socket {sid} has invalid file descriptor")
+                            return
+                    except Exception as e:
+                        logger.warning(f"Error checking socket validity: {e}")
+                        return
+                
                 # Wrap socket with error handling
                 wrapped_socket = wrap_socket(socket)
                 socket_manager.add_socket(sid, wrapped_socket)
                 logger.info(f"New socket connection: {sid}")
     except Exception as e:
         logger.error(f"Error in handle_connect: {e}")
+        if 'sid' in locals():
+            cleanup_socket(sid, None)
 
 @socketio.on('disconnect')
 def handle_disconnect():
