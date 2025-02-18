@@ -6,6 +6,7 @@ import threading
 import logging
 import signal
 import sys
+import time
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -16,6 +17,7 @@ eventlet.hubs.use_hub()
 
 # Global flag for graceful shutdown
 is_shutting_down = False
+active_sockets = set()
 
 def signal_handler(signum, frame):
     """Handle shutdown signals"""
@@ -34,14 +36,37 @@ def cleanup_sockets():
     try:
         logger.info("Starting socket cleanup...")
         if hasattr(socketio, 'server') and hasattr(socketio.server, 'eio'):
-            for sid in list(socketio.server.eio.sockets.keys()):
+            # Get a copy of the sockets dict to avoid modification during iteration
+            sockets = dict(socketio.server.eio.sockets)
+            for sid, socket in sockets.items():
                 try:
                     logger.info(f"Cleaning up socket {sid}")
-                    socket = socketio.server.eio.sockets[sid]
+                    # Remove from rooms first
+                    if hasattr(socketio.server, 'rooms'):
+                        rooms = socketio.server.rooms(sid, '/')
+                        if rooms:
+                            for room in rooms:
+                                socketio.server.leave_room(sid, room, '/')
+                    
+                    # Close socket with force
                     socket.close(wait=False, abort=True)
-                    del socketio.server.eio.sockets[sid]
+                    
+                    # Remove from server
+                    if sid in socketio.server.eio.sockets:
+                        del socketio.server.eio.sockets[sid]
+                        
+                    # Clear any remaining state
+                    if hasattr(socket, 'state'):
+                        socket.state = None
                 except Exception as e:
                     logger.error(f"Error cleaning up socket {sid}: {e}")
+                    continue
+                    
+            # Clear all remaining state
+            socketio.server.eio.sockets.clear()
+            if hasattr(socketio.server, '_rooms'):
+                socketio.server._rooms.clear()
+            
         logger.info("Socket cleanup completed")
     except Exception as e:
         logger.error(f"Error in socket cleanup: {e}")
@@ -59,8 +84,8 @@ socketio.init_app(
     app,
     async_mode='eventlet',
     cors_allowed_origins=["https://liqbot-038f.onrender.com"],
-    ping_timeout=20,
-    ping_interval=10,
+    ping_timeout=15,
+    ping_interval=5,
     manage_session=True,
     message_queue=None,
     always_connect=True,
@@ -79,7 +104,11 @@ socketio.init_app(
     cors_headers=['Content-Type'],
     close_timeout=5,
     max_queue_size=10,
-    async_mode_client='eventlet'
+    async_mode_client='eventlet',
+    reconnection=True,
+    reconnection_attempts=Infinity,
+    reconnection_delay=1000,
+    reconnection_delay_max=5000
 )
 
 # Register cleanup function
@@ -99,11 +128,9 @@ if __name__ == '__main__':
         )
     except KeyboardInterrupt:
         logger.info("Received KeyboardInterrupt. Starting cleanup...")
-    socketio.run(
-        app,
-        host='0.0.0.0',
-        port=10000,
-        debug=False,
-        use_reloader=False,
-        log_output=True
-    ) 
+        cleanup_sockets()
+    except Exception as e:
+        logger.error(f"Error in main: {e}")
+        cleanup_sockets()
+    finally:
+        cleanup_sockets() 
