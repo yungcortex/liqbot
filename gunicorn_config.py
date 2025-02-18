@@ -1,27 +1,26 @@
 import eventlet
 eventlet.monkey_patch()
 
-import multiprocessing
 import os
 
 # Server socket settings
 bind = "0.0.0.0:" + str(os.getenv("PORT", "10000"))
 backlog = 2048
 
-# Worker processes
-workers = multiprocessing.cpu_count() * 2 + 1
+# Worker processes - optimized for WebSocket connections
+workers = 4  # Fixed number of workers for better stability
 worker_class = "eventlet"
-worker_connections = 1000
+worker_connections = 2000
 
 # Timeouts
 timeout = 300  # 5 minutes
-keepalive = 5
+keepalive = 2
 graceful_timeout = 30
 
 # Logging
 accesslog = "-"
 errorlog = "-"
-loglevel = "debug"
+loglevel = "info"  # Changed from debug to reduce log noise
 
 # SSL
 keyfile = None
@@ -42,18 +41,9 @@ user = None
 group = None
 tmp_upload_dir = None
 
-# Eventlet-specific settings
-worker_connections = 1000
-worker_class = "eventlet"
-
 def post_fork(server, worker):
     """Set up worker after fork."""
     server.log.info("Worker spawned (pid: %s)", worker.pid)
-    
-    # Set eventlet timeout
-    eventlet.timeout.Timeout(300)  # 5 minutes
-    
-    # Initialize eventlet hub
     eventlet.hubs.use_hub()
 
 def on_exit(server):
@@ -61,7 +51,7 @@ def on_exit(server):
     server.log.info("Shutting down")
 
 # WebSocket settings
-websocket_max_message_size = 1024 * 1024 * 100  # 100MB
+websocket_max_message_size = 16 * 1024 * 1024  # 16MB
 websocket_ping_interval = 25
 websocket_ping_timeout = 120
 websocket_per_message_deflate = True
@@ -94,7 +84,7 @@ def worker_int(worker):
 
 # WebSocket specific settings
 worker_class_args = {
-    'worker_connections': 1000,
+    'worker_connections': 2000,
     'websocket_max_message_size': 16 * 1024 * 1024,  # 16MB
     'websocket_ping_interval': 25,  # Send ping every 25 seconds
     'websocket_ping_timeout': 120  # Wait 120 seconds for pong response
