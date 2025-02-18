@@ -141,7 +141,13 @@
 </head>
 <body class="p-8">
     <div class="container mx-auto">
-        <h1 class="text-center mb-8">Crypto Liquidation Tracker</h1>
+        <div class="flex justify-between items-center mb-8">
+            <h1 class="text-center">Crypto Liquidation Tracker</h1>
+            <div class="crypto-card rounded-lg px-4 py-2">
+                <span>Status: </span>
+                <span id="connection-status" class="font-bold">Connecting...</span>
+            </div>
+        </div>
         
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
             <!-- Bitcoin Card -->
@@ -249,7 +255,9 @@
         socket.on('connect', () => {
             console.log('Connected to server');
             document.getElementById('connection-status').textContent = 'Connected';
-            document.getElementById('connection-status').style.color = 'green';
+            document.getElementById('connection-status').style.color = '#00ff00';
+            feed.innerHTML = '<div class="terminal-line">Connected to liquidation feed</div>';
+            socket.emit('get_stats');
             isConnecting = false;
             if (reconnectTimer) {
                 clearTimeout(reconnectTimer);
@@ -260,7 +268,8 @@
         socket.on('connect_error', (error) => {
             console.error('Connection error:', error);
             document.getElementById('connection-status').textContent = 'Connection Error';
-            document.getElementById('connection-status').style.color = 'red';
+            document.getElementById('connection-status').style.color = '#ff0000';
+            feed.innerHTML += '<div class="terminal-line">Connection error. Retrying...</div>';
             
             if (!isConnecting && !reconnectTimer) {
                 isConnecting = true;
@@ -277,7 +286,8 @@
         socket.on('disconnect', (reason) => {
             console.log('Disconnected:', reason);
             document.getElementById('connection-status').textContent = 'Disconnected';
-            document.getElementById('connection-status').style.color = 'red';
+            document.getElementById('connection-status').style.color = '#ff0000';
+            feed.innerHTML += '<div class="terminal-line">Disconnected from server. Attempting to reconnect...</div>';
             
             if (!isConnecting && !reconnectTimer && reason !== 'io server disconnect' && reason !== 'io client disconnect') {
                 isConnecting = true;

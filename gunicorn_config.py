@@ -4,7 +4,7 @@ eventlet.monkey_patch()
 import os
 
 # Server socket settings
-bind = "0.0.0.0:" + str(os.getenv("PORT", "10000"))
+bind = f"0.0.0.0:{os.environ.get('PORT', '10000')}"
 backlog = 2048
 
 # Worker processes
