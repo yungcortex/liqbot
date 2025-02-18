@@ -246,26 +246,27 @@ socketio.init_app(
     app,
     async_mode='eventlet',
     cors_allowed_origins=["https://liqbot-038f.onrender.com"],
-    ping_timeout=20,
-    ping_interval=10,
+    ping_timeout=20000,  # Increased ping timeout
+    ping_interval=10000,  # Increased ping interval
     manage_session=False,  # Disable session management to prevent ID mismatch
     message_queue=None,
     always_connect=True,
     transports=['websocket'],
-    cookie=False,
+    cookie=None,  # Disable cookies to prevent issues
     logger=True,
     engineio_logger=True,
     async_handlers=True,
     monitor_clients=True,
     upgrade_timeout=5000,
-    max_http_buffer_size=1024 * 1024,
+    max_http_buffer_size=1024 * 1024,  # 1MB HTTP buffer size
     websocket_ping_interval=10,
     websocket_ping_timeout=20,
     websocket_max_message_size=1024 * 1024,
     cors_credentials=False,
     cors_headers=['Content-Type'],
-    close_timeout=10,
-    max_queue_size=10,
+    cors_allowed_methods=['GET', 'POST', 'OPTIONS'],  # Explicitly set allowed methods
+    close_timeout=10000,  # Increased close timeout
+    max_queue_size=100,  # Increased queue size
     reconnection=True,
     reconnection_attempts=float('inf'),
     reconnection_delay=1000,
@@ -278,25 +279,13 @@ socketio.init_app(
     engineio_logger_kwargs={'level': logging.INFO},
     namespace='/',  # Explicitly set default namespace
     allow_upgrades=True,  # Enable upgrades for WebSocket
-    initial_packet_timeout=10,  # Increase initial packet timeout
-    connect_timeout=10,  # Increase connect timeout
+    initial_packet_timeout=10,  # Initial packet timeout
+    connect_timeout=10,  # Connect timeout
     upgrades=['websocket'],  # Allow WebSocket upgrades
     allow_reconnection=True,
     json=True,  # Enable JSON support
     handle_sigint=False,  # Let gunicorn handle signals
-    max_buffer_size=1024 * 1024,  # 1MB buffer size
-    always_connect=True,  # Always allow connections
-    async_mode_client='eventlet',  # Use eventlet for client connections
-    async_handlers=True,  # Enable async handlers
-    cookie=None,  # Disable cookies to prevent issues
-    engineio_logger=True,  # Enable Engine.IO logging
-    cors_allowed_methods=['GET', 'POST', 'OPTIONS'],  # Explicitly set allowed methods
-    cors_credentials=False,  # Disable credentials
-    max_http_buffer_size=1024 * 1024,  # 1MB HTTP buffer size
-    ping_timeout=20000,  # Increase ping timeout
-    ping_interval=10000,  # Increase ping interval
-    close_timeout=10000,  # Increase close timeout
-    max_queue_size=100  # Increase queue size
+    max_buffer_size=1024 * 1024  # 1MB buffer size
 )
 
 # Socket connection handler
