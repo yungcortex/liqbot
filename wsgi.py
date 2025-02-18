@@ -262,7 +262,9 @@ socketio.init_app(
     ping_interval_grace_period=2000,
     async_handlers_kwargs={'async_mode': 'eventlet'},
     engineio_logger_kwargs={'level': logging.INFO},
-    namespace='/'  # Explicitly set default namespace
+    namespace='/',  # Explicitly set default namespace
+    allow_upgrades=False,  # Disable upgrades to prevent race conditions
+    initial_packet_timeout=5  # Reduce initial packet timeout
 )
 
 # Socket connection handler
@@ -275,32 +277,24 @@ def handle_connect():
             logger.error("No session ID found for connection")
             return False
             
-        # Immediately try to get the socket first
+        # Get the socket immediately
         socket = None
         if hasattr(socketio.server, 'eio'):
             socket = socketio.server.eio.sockets.get(sid)
             
-        # If not found, use shorter retries with minimal delay
         if not socket:
-            max_retries = 3
-            retry_count = 0
-            while retry_count < max_retries:
-                if hasattr(socketio.server, 'eio'):
-                    socket = socketio.server.eio.sockets.get(sid)
-                    if socket:
-                        break
-                retry_count += 1
-                eventlet.sleep(0.05)  # Very short delay
-                logger.info(f"Quick retry {retry_count}/{max_retries} for socket {sid}")
-                
-        if not socket:
-            logger.error(f"No socket found for {sid} after quick retries")
+            logger.error(f"No socket found for {sid}")
             return False
             
-        # Force namespace connection
+        # Initialize namespace first
         if hasattr(socketio.server, 'manager'):
-            socketio.server.manager.initialize(sid)
-            socketio.server.manager.connect(sid, '/')
+            try:
+                socketio.server.manager.initialize(sid)
+                socketio.server.manager.connect(sid, '/')
+                logger.info(f"Namespace initialized for {sid}")
+            except Exception as e:
+                logger.error(f"Error initializing namespace for {sid}: {e}")
+                return False
             
         # Wrap socket with error handling
         wrapped_socket = wrap_socket(socket)
@@ -308,9 +302,9 @@ def handle_connect():
             socket_manager.add_socket(sid, wrapped_socket)
             logger.info(f"New socket connection established: {sid}")
             
-            # Immediately emit connection success
+            # Emit connection success
             try:
-                emit('connection_success', {'status': 'connected', 'sid': sid}, namespace='/')
+                socketio.emit('connection_success', {'status': 'connected', 'sid': sid}, room=sid, namespace='/')
                 socketio.sleep(0)  # Force immediate emission
                 return True
             except Exception as e:

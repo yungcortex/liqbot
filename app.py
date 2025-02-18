@@ -56,7 +56,9 @@ socketio = SocketIO(
     max_retries=float('inf'),
     retry_delay=1000,
     retry_delay_max=5000,
-    ping_interval_grace_period=2000
+    ping_interval_grace_period=2000,
+    allow_upgrades=False,  # Disable upgrades to prevent race conditions
+    initial_packet_timeout=5  # Reduce initial packet timeout
 )
 
 # Configure CORS
@@ -175,32 +177,24 @@ def handle_connect():
             logger.error("No session ID found for connection")
             return False
             
-        # Immediately try to get the socket first
+        # Get the socket immediately
         socket = None
         if hasattr(socketio.server, 'eio'):
             socket = socketio.server.eio.sockets.get(sid)
             
-        # If not found, use shorter retries with minimal delay
         if not socket:
-            max_retries = 3
-            retry_count = 0
-            while retry_count < max_retries:
-                if hasattr(socketio.server, 'eio'):
-                    socket = socketio.server.eio.sockets.get(sid)
-                    if socket:
-                        break
-                retry_count += 1
-                eventlet.sleep(0.05)  # Very short delay
-                logger.info(f"Quick retry {retry_count}/{max_retries} for socket {sid}")
-                
-        if not socket:
-            logger.error(f"No socket found for {sid} after quick retries")
+            logger.error(f"No socket found for {sid}")
             return False
             
-        # Force namespace connection
+        # Initialize namespace first
         if hasattr(socketio.server, 'manager'):
-            socketio.server.manager.initialize(sid)
-            socketio.server.manager.connect(sid, '/')
+            try:
+                socketio.server.manager.initialize(sid)
+                socketio.server.manager.connect(sid, '/')
+                logger.info(f"Namespace initialized for {sid}")
+            except Exception as e:
+                logger.error(f"Error initializing namespace for {sid}: {e}")
+                return False
             
         # Add to active connections
         with connection_lock:
@@ -210,9 +204,9 @@ def handle_connect():
                 'socket': socket
             }
             
-        # Immediately emit initial stats
+        # Emit initial stats
         try:
-            emit('stats', {'status': 'connected', 'sid': sid}, namespace='/')
+            socketio.emit('stats', {'status': 'connected', 'sid': sid}, room=sid, namespace='/')
             socketio.sleep(0)  # Force immediate emission
             logger.info(f"Client connected successfully: {sid}")
             return True
@@ -253,6 +247,7 @@ def handle_heartbeat():
         if sid and sid in active_connections:
             with connection_lock:
                 active_connections[sid]['last_heartbeat'] = time.time()
+                logger.debug(f"Heartbeat received from {sid}")
     except Exception as e:
         logger.error(f"Error in handle_heartbeat: {e}")
 
@@ -262,7 +257,8 @@ def handle_get_stats():
     try:
         sid = request.sid
         if sid and is_socket_valid(sid):
-            emit('stats', {'status': 'active', 'sid': sid}, namespace='/')
+            socketio.emit('stats', {'status': 'active', 'sid': sid}, room=sid, namespace='/')
+            logger.debug(f"Stats sent to {sid}")
     except Exception as e:
         logger.error(f"Error in handle_get_stats: {e}")
 
@@ -282,7 +278,7 @@ def emit_update(data, event_type='stats_update'):
         for sid in active_sids:
             try:
                 socketio.emit(event_type, data, room=sid, namespace='/')
-                socketio.sleep(0)  # Force event emission
+                socketio.sleep(0)  # Force immediate emission
             except Exception as e:
                 logger.error(f"Error emitting to {sid}: {e}")
                 with connection_lock:
