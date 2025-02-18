@@ -51,6 +51,7 @@ tmp_upload_dir = None
 def on_starting(server):
     """Initialize server."""
     logger.info("Server starting up")
+    eventlet.hubs.use_hub()
 
 def when_ready(server):
     """Called just after the server is started."""
@@ -66,9 +67,14 @@ def post_fork(server, worker):
     logger.info("Worker spawned (pid: %s)", worker.pid)
     # Ensure eventlet hub is initialized in worker
     eventlet.hubs.use_hub()
-    # Clear any existing connections
-    if hasattr(worker.wsgi.application, 'socketio'):
-        worker.wsgi.application.socketio.server.eio.clients = {}
+    try:
+        # Clear any existing connections
+        if hasattr(worker, 'app') and hasattr(worker.app, 'wsgi'):
+            app = worker.app.wsgi
+            if hasattr(app, 'socketio'):
+                app.socketio.server.eio.clients = {}
+    except Exception as e:
+        logger.error("Error in post_fork: %s", e)
 
 def pre_exec(server):
     """Pre-exec handler."""
@@ -78,17 +84,21 @@ def pre_exec(server):
 def worker_int(worker):
     """Handle worker interruption signals."""
     logger.info("Worker received INT or QUIT signal")
-    # Get the current eventlet hub
-    hub = eventlet.hubs.get_hub()
-    if hub is not None:
-        # Stop accepting new connections
-        hub.abort()
-        # Close all existing sockets
-        for sock in hub.descriptors.values():
-            try:
-                sock.close()
-            except Exception:
-                pass
+    try:
+        # Get the current eventlet hub
+        hub = eventlet.hubs.get_hub()
+        if hub is not None:
+            # Stop accepting new connections
+            hub.abort()
+            # Close all existing sockets
+            if hasattr(hub, 'sockets'):
+                for sock in hub.sockets.values():
+                    try:
+                        sock.close()
+                    except Exception:
+                        pass
+    except Exception as e:
+        logger.error("Error in worker_int: %s", e)
 
 def worker_abort(worker):
     """Handle worker abort."""
@@ -104,8 +114,9 @@ def worker_exit(server, worker):
         if hub is not None:
             # Stop the hub
             hub.abort()
-            # Clear all descriptors
-            hub.descriptors.clear()
+            # Clear all sockets
+            if hasattr(hub, 'sockets'):
+                hub.sockets.clear()
     except Exception as e:
         logger.error("Error cleaning up worker: %s", e)
 
@@ -148,18 +159,21 @@ worker_rlimit_nofile = 4096
 def on_exit(server):
     """Handle server shutdown."""
     logger.info("Server shutting down")
-    # Clean up any remaining connections
-    if hasattr(server.app, 'wsgi') and hasattr(server.app.wsgi, 'application'):
-        app = server.app.wsgi.application
-        if hasattr(app, 'socketio'):
-            try:
-                # Close all socket connections
-                for client in app.socketio.server.eio.clients.values():
-                    try:
-                        client.close()
-                    except Exception:
-                        pass
-                # Clear all clients
-                app.socketio.server.eio.clients.clear()
-            except Exception as e:
-                logger.error("Error cleaning up SocketIO: %s", e) 
+    try:
+        # Clean up any remaining connections
+        if hasattr(server, 'app') and hasattr(server.app, 'wsgi'):
+            app = server.app.wsgi
+            if hasattr(app, 'socketio'):
+                try:
+                    # Close all socket connections
+                    for client in app.socketio.server.eio.clients.values():
+                        try:
+                            client.close()
+                        except Exception:
+                            pass
+                    # Clear all clients
+                    app.socketio.server.eio.clients.clear()
+                except Exception as e:
+                    logger.error("Error cleaning up SocketIO: %s", e)
+    except Exception as e:
+        logger.error("Error in on_exit: %s", e) 
