@@ -61,12 +61,23 @@ def handle_socket_error(socket, e):
 
 def wrap_socket(sock):
     """Wrap a socket with error handling"""
+    if not sock or not hasattr(sock, 'send') or not hasattr(sock, 'close'):
+        return sock
+        
     _send = sock.send
     _close = sock.close
     _shutdown = getattr(sock, 'shutdown', None)
     
     def safe_send(data, *args, **kwargs):
         try:
+            if hasattr(sock, 'closed') and sock.closed:
+                return 0
+            if hasattr(sock, 'fileno'):
+                try:
+                    if sock.fileno() == -1:
+                        return 0
+                except Exception:
+                    return 0
             return _send(data, *args, **kwargs)
         except Exception as e:
             if not handle_socket_error(sock, e):
@@ -75,10 +86,14 @@ def wrap_socket(sock):
             
     def safe_close(*args, **kwargs):
         try:
-            # Try to shutdown the socket first
-            if _shutdown:
+            if hasattr(sock, 'closed') and sock.closed:
+                return
+                
+            # Try to shutdown the socket first if it's still valid
+            if _shutdown and hasattr(sock, 'fileno'):
                 try:
-                    _shutdown(socket.SHUT_RDWR)
+                    if sock.fileno() != -1:
+                        _shutdown(socket.SHUT_RDWR)
                 except Exception as e:
                     handle_socket_error(sock, e)
             
@@ -104,6 +119,11 @@ def cleanup_socket(sid, socket):
             logger.warning(f"Socket {sid} already removed")
             return
             
+        # Check if socket is already closed
+        if hasattr(socket, 'closed') and socket.closed:
+            logger.warning(f"Socket {sid} is already closed")
+            return
+            
         # Remove from rooms
         if hasattr(socketio.server, 'rooms'):
             try:
@@ -119,15 +139,19 @@ def cleanup_socket(sid, socket):
         # Close socket safely
         if hasattr(socket, 'close'):
             try:
-                # Try to shutdown the socket first if it's still connected
-                if hasattr(socket, 'shutdown') and hasattr(socket, 'fileno'):
+                # Check if socket is still valid before attempting shutdown
+                if hasattr(socket, 'fileno'):
                     try:
-                        if socket.fileno() != -1:  # Check if socket is still valid
-                            socket.shutdown(socket.SHUT_RDWR)
-                    except Exception as e:
-                        handle_socket_error(socket, e)
+                        if socket.fileno() != -1:
+                            if hasattr(socket, 'shutdown'):
+                                try:
+                                    socket.shutdown(socket.SHUT_RDWR)
+                                except Exception as e:
+                                    handle_socket_error(socket, e)
+                    except Exception:
+                        pass
                 
-                # Then close it
+                # Close the socket
                 socket.close(wait=False, abort=True)
             except Exception as e:
                 handle_socket_error(socket, e)
@@ -191,9 +215,11 @@ application = app
 # Socket.IO middleware to wrap sockets
 def socket_middleware(wsgi_app):
     def middleware(environ, start_response):
-        # Wrap the socket with error handling
-        if 'eventlet.input' in environ:
-            environ['eventlet.input'].socket = wrap_socket(environ['eventlet.input'].socket)
+        # Only wrap valid sockets
+        if 'eventlet.input' in environ and hasattr(environ['eventlet.input'], 'socket'):
+            socket = environ['eventlet.input'].socket
+            if socket and not (hasattr(socket, 'closed') and socket.closed):
+                environ['eventlet.input'].socket = wrap_socket(socket)
         return wsgi_app(environ, start_response)
     return middleware
 
@@ -248,26 +274,31 @@ def handle_connect():
             
         if hasattr(socketio.server, 'eio'):
             socket = socketio.server.eio.sockets.get(sid)
-            if socket:
-                # Check if socket is already closed
-                if hasattr(socket, 'closed') and socket.closed:
-                    logger.warning(f"Socket {sid} is already closed")
-                    return
-                    
-                # Check if socket is still valid
-                if hasattr(socket, 'fileno'):
-                    try:
-                        if socket.fileno() == -1:
-                            logger.warning(f"Socket {sid} has invalid file descriptor")
-                            return
-                    except Exception as e:
-                        logger.warning(f"Error checking socket validity: {e}")
-                        return
+            if not socket:
+                logger.warning(f"No socket found for {sid}")
+                return
                 
-                # Wrap socket with error handling
-                wrapped_socket = wrap_socket(socket)
+            # Check if socket is already closed
+            if hasattr(socket, 'closed') and socket.closed:
+                logger.warning(f"Socket {sid} is already closed")
+                return
+                
+            # Check if socket is still valid
+            if hasattr(socket, 'fileno'):
+                try:
+                    if socket.fileno() == -1:
+                        logger.warning(f"Socket {sid} has invalid file descriptor")
+                        return
+                except Exception as e:
+                    logger.warning(f"Error checking socket validity: {e}")
+                    return
+            
+            # Wrap socket with error handling
+            wrapped_socket = wrap_socket(socket)
+            if wrapped_socket:
                 socket_manager.add_socket(sid, wrapped_socket)
                 logger.info(f"New socket connection: {sid}")
+            
     except Exception as e:
         logger.error(f"Error in handle_connect: {e}")
         if 'sid' in locals():
