@@ -36,34 +36,35 @@ socketio = SocketIO(
     async_mode='eventlet',
     logger=True,
     engineio_logger=True,
-    ping_timeout=20,
-    ping_interval=10,
-    manage_session=False,
-    cookie=None,
+    ping_timeout=60,
+    ping_interval=25,
+    manage_session=True,
+    cookie=True,
     always_connect=True,
-    transports=['polling'],  # Start with polling only
-    websocket=False,  # Disable WebSocket for now
-    upgrade_timeout=5000,
+    transports=['polling', 'websocket'],
+    websocket=True,
+    upgrade_timeout=30000,
     max_queue_size=100,
     json=json,
-    cors_credentials=False,
+    cors_credentials=True,
     async_handlers=True,
     monitor_clients=True,
-    allow_upgrades=False,  # Disable upgrades
+    allow_upgrades=True,
     http_compression=True,
     compression_threshold=1024,
     max_http_buffer_size=1e6,
-    verify_session=False
+    verify_session=True,
+    session_lifetime=120
 )
 
-# Configure CORS with simpler settings
+# Configure CORS with proper settings
 CORS(app, resources={
     r"/*": {
         "origins": "*",
         "methods": ["GET", "POST", "OPTIONS"],
         "allow_headers": ["*"],
-        "supports_credentials": False,
-        "max_age": 1800
+        "supports_credentials": True,
+        "max_age": 3600
     }
 })
 
