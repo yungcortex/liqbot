@@ -185,7 +185,7 @@ socketio.init_app(
     manage_session=True,
     message_queue=None,
     always_connect=True,
-    transports=['websocket', 'polling'],  # Enable both transports
+    transports=['websocket', 'polling'],
     cookie=None,
     logger=True,
     engineio_logger=True,
@@ -206,7 +206,17 @@ socketio.init_app(
     max_retries=float('inf'),
     retry_delay=1000,
     retry_delay_max=5000,
-    ping_interval_grace_period=1000
+    ping_interval_grace_period=1000,
+    allow_upgrades=True,
+    json=True,
+    http_compression=True,
+    compression_threshold=1024,
+    max_decode_packets=50,
+    max_encode_packets=50,
+    handle_sigint=False,
+    namespace='/',
+    async_handlers_kwargs={'async_mode': 'eventlet'},
+    engineio_logger_kwargs={'level': logging.INFO}
 )
 
 # Socket connection handler

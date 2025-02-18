@@ -226,34 +226,36 @@
     <script>
         // Socket.IO connection with improved timeout handling
         const socket = io('https://liqbot-038f.onrender.com', {
-            transports: ['websocket'],
+            transports: ['websocket', 'polling'],
             reconnection: true,
-            reconnectionDelay: 1000,
-            reconnectionDelayMax: 10000,
             reconnectionAttempts: Infinity,
-            timeout: 20000,
+            reconnectionDelay: 1000,
+            reconnectionDelayMax: 5000,
+            timeout: 5000,
             autoConnect: true,
-            forceNew: false,
+            forceNew: true,
             secure: true,
             rejectUnauthorized: false,
-            withCredentials: false,
-            upgrade: false,
-            rememberUpgrade: false,
+            withCredentials: true,
             path: '/socket.io/',
             query: {},
-            extraHeaders: {},
-            timestampRequests: true,
+            extraHeaders: {
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            upgrade: true,
+            rememberUpgrade: true,
+            timestampRequests: false,
             timestampParam: 't',
-            closeOnBeforeunload: false,
-            pingInterval: 10000,
+            closeOnBeforeunload: true,
+            pingInterval: 2500,
             pingTimeout: 5000
         });
 
         // Connection state tracking
         let isConnecting = false;
         let reconnectTimer = null;
-        const RECONNECT_DELAY = 2000;
-        const MAX_RECONNECT_DELAY = 10000;
+        const RECONNECT_DELAY = 1000;
+        const MAX_RECONNECT_DELAY = 5000;
 
         // Debug logging for connection events
         socket.onAny((eventName, ...args) => {
@@ -266,20 +268,32 @@
             document.getElementById('connection-status').textContent = 'Connected';
             document.getElementById('connection-status').style.color = '#00ff00';
             feed.innerHTML = '<div class="terminal-line">Connected to liquidation feed</div>';
-            socket.emit('get_stats');
             isConnecting = false;
             if (reconnectTimer) {
                 clearTimeout(reconnectTimer);
                 reconnectTimer = null;
             }
-            startHeartbeat(); // Start heartbeat after successful connection
+            startHeartbeat();
+        });
+
+        socket.on('connection_status', (data) => {
+            console.log('[Socket] Connection status:', data);
+            if (data.status === 'connected') {
+                document.getElementById('connection-status').textContent = 'Connected';
+                document.getElementById('connection-status').style.color = '#00ff00';
+            }
+        });
+
+        socket.on('initial_data', (data) => {
+            console.log('[Socket] Received initial data:', data);
+            updateStats(data);
         });
 
         socket.on('connect_error', (error) => {
             console.error('[Socket] Connection error:', error);
             document.getElementById('connection-status').textContent = 'Connection Error';
             document.getElementById('connection-status').style.color = '#ff0000';
-            feed.innerHTML += '<div class="terminal-line">Connection error. Retrying...</div>';
+            feed.innerHTML = '<div class="terminal-line">Connection error. Retrying...</div>';
             
             if (!isConnecting && !reconnectTimer) {
                 isConnecting = true;
@@ -298,13 +312,13 @@
             console.log('[Socket] Disconnected:', reason);
             document.getElementById('connection-status').textContent = 'Disconnected';
             document.getElementById('connection-status').style.color = '#ff0000';
-            feed.innerHTML += '<div class="terminal-line">Disconnected from server. Attempting to reconnect...</div>';
+            feed.innerHTML = '<div class="terminal-line">Disconnected from server. Attempting to reconnect...</div>';
             
-            stopHeartbeat(); // Stop heartbeat on disconnect
+            stopHeartbeat();
             
-            if (!isConnecting && !reconnectTimer && reason !== 'io server disconnect' && reason !== 'io client disconnect') {
+            if (!isConnecting && !reconnectTimer) {
                 isConnecting = true;
-                let delay = Math.min(RECONNECT_DELAY, MAX_RECONNECT_DELAY);
+                const delay = Math.min(RECONNECT_DELAY, MAX_RECONNECT_DELAY);
                 console.log(`[Socket] Scheduling reconnect in ${delay}ms`);
                 reconnectTimer = setTimeout(() => {
                     isConnecting = false;
@@ -317,20 +331,22 @@
             }
         });
 
-        // Heartbeat mechanism with shorter intervals
+        // Heartbeat mechanism
         let heartbeatInterval = null;
         let missedHeartbeats = 0;
         const MAX_MISSED_HEARTBEATS = 3;
-        const HEARTBEAT_INTERVAL = 10000;
+        const HEARTBEAT_INTERVAL = 2500;
 
         function startHeartbeat() {
-            stopHeartbeat(); // Clear any existing interval
+            stopHeartbeat();
             missedHeartbeats = 0;
             
             heartbeatInterval = setInterval(() => {
                 if (socket.connected) {
+                    console.log('[Socket] Sending heartbeat');
                     missedHeartbeats++;
                     socket.emit('heartbeat', () => {
+                        console.log('[Socket] Heartbeat acknowledged');
                         missedHeartbeats = 0;
                     });
                     
@@ -355,29 +371,36 @@
             }
         }
 
-        const feed = document.getElementById('liquidation-feed');
-        
-        socket.on('stats_update', (data) => {
-            console.log('Stats update received:', data);
+        function updateStats(data) {
             try {
                 if (!data) {
                     console.error('Received empty stats update');
                     return;
                 }
                 
+                const symbolMap = {
+                    'bitcoin': 'btc',
+                    'ethereum': 'eth',
+                    'solana': 'sol'
+                };
+                
                 for (const [symbol, stats] of Object.entries(data)) {
-                    const lower = symbol.toLowerCase();
+                    const shortSymbol = symbolMap[symbol.toLowerCase()];
+                    if (!shortSymbol) continue;
+                    
                     console.log(`Updating stats for ${symbol}:`, stats);
                     
-                    if (stats.longs !== undefined) updateElementWithGlitch(`${lower}-longs`, stats.longs);
-                    if (stats.shorts !== undefined) updateElementWithGlitch(`${lower}-shorts`, stats.shorts);
-                    if (stats.total_value !== undefined) updateElementWithGlitch(`${lower}-total`, formatNumber(stats.total_value));
+                    if (stats.long_liqs !== undefined) updateElementWithGlitch(`${shortSymbol}-longs`, stats.long_liqs);
+                    if (stats.short_liqs !== undefined) updateElementWithGlitch(`${shortSymbol}-shorts`, stats.short_liqs);
+                    if (stats.total_value !== undefined) updateElementWithGlitch(`${shortSymbol}-total`, formatNumber(stats.total_value));
                 }
             } catch (error) {
                 console.error('Error processing stats update:', error, data);
             }
-        });
+        }
 
+        const feed = document.getElementById('liquidation-feed');
+        
         socket.on('liquidation', (data) => {
             console.log('Liquidation event received:', data);
             try {
