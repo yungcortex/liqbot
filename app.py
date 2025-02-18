@@ -81,6 +81,19 @@ latest_stats = {
     "SOL": {"longs": 0, "shorts": 0, "total_value": 0}
 }
 
+def handle_socket_error(socket, e):
+    """Handle socket errors gracefully"""
+    if isinstance(e, (IOError, OSError)):
+        if e.errno == errno.EBADF:
+            # Bad file descriptor - socket was closed
+            logger.warning(f"Socket was already closed: {e}")
+            return True
+        elif e.errno in (errno.EPIPE, errno.ENOTCONN, errno.ESHUTDOWN):
+            # Connection broken, not connected, or already shut down
+            logger.warning(f"Socket connection error: {e}")
+            return True
+    return False
+
 # Connection management
 class ConnectionManager:
     def __init__(self):
@@ -135,25 +148,42 @@ class ConnectionManager:
             
             # Remove from rooms
             if hasattr(socketio.server, 'rooms'):
-                rooms = socketio.server.rooms(sid, '/')
-                if rooms:
-                    for room in rooms:
-                        socketio.server.leave_room(sid, room, '/')
+                try:
+                    rooms = socketio.server.rooms(sid, '/')
+                    if rooms:
+                        for room in rooms:
+                            try:
+                                socketio.server.leave_room(sid, room, '/')
+                            except Exception as e:
+                                logger.warning(f"Error removing from room {room}: {e}")
+                except Exception as e:
+                    logger.warning(f"Error getting rooms for {sid}: {e}")
             
             # Get socket and clean up
             if hasattr(socketio.server, 'eio') and sid in socketio.server.eio.sockets:
                 socket = socketio.server.eio.sockets[sid]
                 
                 # Force close if still connected
-                if hasattr(socket, 'close'):
+                if socket and hasattr(socket, 'close'):
                     try:
+                        # Try to shutdown the socket first
+                        if hasattr(socket, 'shutdown'):
+                            try:
+                                socket.shutdown(socket.SHUT_RDWR)
+                            except Exception as e:
+                                handle_socket_error(socket, e)
+                        
+                        # Then close it
                         socket.close(wait=False, abort=True)
                     except Exception as e:
-                        if not isinstance(e, (IOError, OSError)) or e.errno != errno.EBADF:
+                        if not handle_socket_error(socket, e):
                             logger.error(f"Error closing socket {sid}: {e}")
                 
                 # Remove from server
-                del socketio.server.eio.sockets[sid]
+                try:
+                    del socketio.server.eio.sockets[sid]
+                except Exception as e:
+                    logger.warning(f"Error removing socket from server: {e}")
                 
         except Exception as e:
             logger.error(f"Error cleaning up connection {sid}: {e}")
@@ -175,15 +205,27 @@ def handle_connect():
         if hasattr(socketio.server, 'eio'):
             socket = socketio.server.eio.sockets.get(sid)
             if socket:
-                connection_manager.add_connection(sid, socket)
-                
-        # Send initial stats without broadcast
-        emit('stats_update', latest_stats)
-        emit('connection_success', {'message': 'Connected successfully'})
-        
-        # Force immediate send
-        socketio.sleep(0)
-        
+                try:
+                    # Try to shutdown any existing socket first
+                    if hasattr(socket, 'shutdown'):
+                        try:
+                            socket.shutdown(socket.SHUT_RDWR)
+                        except Exception as e:
+                            handle_socket_error(socket, e)
+                            
+                    connection_manager.add_connection(sid, socket)
+                    
+                    # Send initial stats without broadcast
+                    emit('stats_update', latest_stats)
+                    emit('connection_success', {'message': 'Connected successfully'})
+                    
+                    # Force immediate send
+                    socketio.sleep(0)
+                except Exception as e:
+                    logger.error(f"Error setting up connection {sid}: {e}")
+                    connection_manager.cleanup_connection(sid)
+                    disconnect()
+                    
     except Exception as e:
         logger.error(f"Error in handle_connect: {e}")
         if 'sid' in locals():

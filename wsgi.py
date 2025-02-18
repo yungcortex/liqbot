@@ -51,31 +51,45 @@ socket_manager = SocketManager()
 
 def handle_socket_error(socket, e):
     """Handle socket errors gracefully"""
-    if isinstance(e, (IOError, OSError)) and e.errno == errno.EBADF:
-        # Bad file descriptor - socket was closed
-        logger.warning(f"Socket was already closed: {e}")
-        return True
+    if isinstance(e, (IOError, OSError)):
+        if e.errno == errno.EBADF:
+            # Bad file descriptor - socket was closed
+            logger.warning(f"Socket was already closed: {e}")
+            return True
+        elif e.errno in (errno.EPIPE, errno.ENOTCONN, errno.ESHUTDOWN):
+            # Connection broken, not connected, or already shut down
+            logger.warning(f"Socket connection error: {e}")
+            return True
     return False
 
 def wrap_socket(sock):
     """Wrap a socket with error handling"""
     _send = sock.send
     _close = sock.close
+    _shutdown = getattr(sock, 'shutdown', None)
     
     def safe_send(data, *args, **kwargs):
         try:
             return _send(data, *args, **kwargs)
         except Exception as e:
             if not handle_socket_error(sock, e):
-                raise
+                logger.error(f"Error in safe_send: {e}")
             return 0
             
     def safe_close(*args, **kwargs):
         try:
+            # Try to shutdown the socket first
+            if _shutdown:
+                try:
+                    _shutdown(socket.SHUT_RDWR)
+                except Exception as e:
+                    handle_socket_error(sock, e)
+            
+            # Then close it
             return _close(*args, **kwargs)
         except Exception as e:
             if not handle_socket_error(sock, e):
-                raise
+                logger.error(f"Error in safe_close: {e}")
             
     sock.send = safe_send
     sock.close = safe_close
@@ -86,26 +100,43 @@ def cleanup_socket(sid, socket):
     try:
         logger.info(f"Cleaning up socket {sid}")
         
-        # Remove from socket manager
+        # Remove from socket manager first
         socket_manager.remove_socket(sid)
         
         # Remove from rooms
         if hasattr(socketio.server, 'rooms'):
-            rooms = socketio.server.rooms(sid, '/')
-            if rooms:
-                for room in rooms:
-                    socketio.server.leave_room(sid, room, '/')
+            try:
+                rooms = socketio.server.rooms(sid, '/')
+                if rooms:
+                    for room in rooms:
+                        try:
+                            socketio.server.leave_room(sid, room, '/')
+                        except Exception as e:
+                            logger.warning(f"Error removing from room {room}: {e}")
+            except Exception as e:
+                logger.warning(f"Error getting rooms for {sid}: {e}")
         
         # Close socket safely
-        if hasattr(socket, 'close'):
+        if socket and hasattr(socket, 'close'):
             try:
+                # Try to shutdown the socket first
+                if hasattr(socket, 'shutdown'):
+                    try:
+                        socket.shutdown(socket.SHUT_RDWR)
+                    except Exception as e:
+                        handle_socket_error(socket, e)
+                
+                # Then close it
                 socket.close(wait=False, abort=True)
             except Exception as e:
                 handle_socket_error(socket, e)
             
         # Remove from server
-        if hasattr(socketio.server, 'eio') and sid in socketio.server.eio.sockets:
-            del socketio.server.eio.sockets[sid]
+        try:
+            if hasattr(socketio.server, 'eio') and sid in socketio.server.eio.sockets:
+                del socketio.server.eio.sockets[sid]
+        except Exception as e:
+            logger.warning(f"Error removing socket from server: {e}")
             
     except Exception as e:
         logger.error(f"Error cleaning up socket {sid}: {e}")
@@ -116,13 +147,21 @@ def cleanup_sockets():
         logger.info("Starting socket cleanup...")
         if hasattr(socketio.server, 'eio'):
             # Get a copy of the sockets dict to avoid modification during iteration
-            sockets = dict(socketio.server.eio.sockets)
-            for sid, socket in sockets.items():
-                cleanup_socket(sid, socket)
+            try:
+                sockets = dict(socketio.server.eio.sockets)
+                for sid, socket in sockets.items():
+                    try:
+                        cleanup_socket(sid, socket)
+                    except Exception as e:
+                        logger.error(f"Error cleaning up socket {sid}: {e}")
+                        continue
+                    
+                # Clear all remaining state
+                socketio.server.eio.sockets.clear()
+                socket_manager.clear()
                 
-            # Clear all remaining state
-            socketio.server.eio.sockets.clear()
-            socket_manager.clear()
+            except Exception as e:
+                logger.error(f"Error getting sockets dict: {e}")
             
         logger.info("Socket cleanup completed")
     except Exception as e:
@@ -211,6 +250,17 @@ def handle_connect():
                 logger.info(f"New socket connection: {sid}")
     except Exception as e:
         logger.error(f"Error in handle_connect: {e}")
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    """Handle socket disconnection"""
+    try:
+        sid = request.sid
+        if sid:
+            logger.info(f"Client disconnecting: {sid}")
+            cleanup_socket(sid, socketio.server.eio.sockets.get(sid))
+    except Exception as e:
+        logger.error(f"Error in handle_disconnect: {e}")
 
 # Register cleanup function
 import atexit
