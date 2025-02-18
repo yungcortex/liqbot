@@ -219,26 +219,25 @@ application.wsgi_app = socket_middleware(application.wsgi_app)
 socketio.init_app(
     app,
     async_mode='eventlet',
-    cors_allowed_origins=["https://liqbot-038f.onrender.com", "http://liqbot-038f.onrender.com", 
-                         "https://www.liqbot-038f.onrender.com", "http://www.liqbot-038f.onrender.com"],
-    ping_timeout=60000,
-    ping_interval=25000,
-    manage_session=True,
+    cors_allowed_origins="*",  # Temporarily allow all origins for testing
+    ping_timeout=20000,
+    ping_interval=10000,
+    manage_session=False,
     message_queue=None,
     always_connect=True,
-    transports=['websocket'],  # Only use WebSocket transport
+    transports=['polling', 'websocket'],  # Enable both transports
     cookie=None,
     logger=True,
     engineio_logger=True,
     async_handlers=True,
-    monitor_clients=True,
-    upgrade_timeout=60000,
+    monitor_clients=False,
+    upgrade_timeout=20000,
     max_http_buffer_size=1024 * 1024,
-    websocket_ping_interval=25000,
-    websocket_ping_timeout=60000,
-    cors_credentials=True,
+    websocket_ping_interval=10000,
+    websocket_ping_timeout=20000,
+    cors_credentials=False,
     cors_headers=['Content-Type', 'X-Requested-With'],
-    close_timeout=60000,
+    close_timeout=20000,
     max_queue_size=100,
     reconnection=True,
     reconnection_attempts=float('inf'),
@@ -247,10 +246,10 @@ socketio.init_app(
     max_retries=float('inf'),
     retry_delay=1000,
     retry_delay_max=5000,
-    ping_interval_grace_period=5000,
+    ping_interval_grace_period=2000,
     allow_upgrades=True,
     json=True,
-    http_compression=False,  # Disable compression for stability
+    http_compression=False,
     compression_threshold=1024,
     max_decode_packets=50,
     max_encode_packets=50,
@@ -263,11 +262,10 @@ socketio.init_app(
 # Configure CORS for Flask app
 CORS(app, resources={
     r"/*": {
-        "origins": ["https://liqbot-038f.onrender.com", "http://liqbot-038f.onrender.com", 
-                   "https://www.liqbot-038f.onrender.com", "http://www.liqbot-038f.onrender.com"],
+        "origins": "*",  # Temporarily allow all origins for testing
         "methods": ["GET", "POST", "OPTIONS"],
         "allow_headers": ["Content-Type", "X-Requested-With"],
-        "supports_credentials": True,
+        "supports_credentials": False,
         "max_age": 3600
     }
 })
@@ -281,6 +279,8 @@ def handle_connect():
         if not sid:
             logger.error("No session ID found for connection")
             return False
+
+        logger.info(f"New connection attempt from {sid}")
             
         # Get the Engine.IO socket
         socket = None
@@ -291,21 +291,12 @@ def handle_connect():
             logger.error(f"No Engine.IO socket found for {sid}")
             return False
             
-        # Wrap socket with error handling
-        wrapped_socket = wrap_socket(socket)
-        if not wrapped_socket:
-            logger.error(f"Failed to wrap socket for {sid}")
-            return False
-            
-        # Add to socket manager
-        socket_manager.add_socket(sid, wrapped_socket)
-        
         # Add to active connections
         with connection_lock:
             active_connections[sid] = {
                 'connected_at': time.time(),
                 'last_heartbeat': time.time(),
-                'socket': wrapped_socket
+                'socket': socket
             }
             
         logger.info(f"New socket connection established: {sid}")
@@ -335,8 +326,10 @@ def handle_disconnect():
         sid = request.sid
         if sid:
             logger.info(f"Client disconnecting: {sid}")
-            socket = socket_manager.get_socket(sid)
-            cleanup_socket(sid, socket)
+            with connection_lock:
+                if sid in active_connections:
+                    socket = active_connections[sid].get('socket')
+                    cleanup_socket(sid, socket)
     except Exception as e:
         logger.error(f"Error in handle_disconnect: {e}")
 

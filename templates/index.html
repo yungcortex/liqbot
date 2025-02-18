@@ -226,17 +226,17 @@
     <script>
         // Socket.IO connection with improved timeout handling
         const socket = io(window.location.origin, {
-            transports: ['websocket'],
+            transports: ['polling', 'websocket'],
             reconnection: true,
             reconnectionAttempts: Infinity,
             reconnectionDelay: 1000,
             reconnectionDelayMax: 5000,
-            timeout: 60000,
+            timeout: 20000,
             autoConnect: true,
             forceNew: true,
             secure: true,
             rejectUnauthorized: false,
-            withCredentials: true,
+            withCredentials: false,
             path: '/socket.io/',
             query: {},
             extraHeaders: {
@@ -247,8 +247,8 @@
             timestampRequests: false,
             timestampParam: 't',
             closeOnBeforeunload: true,
-            pingInterval: 25000,
-            pingTimeout: 60000
+            pingInterval: 10000,
+            pingTimeout: 20000
         });
 
         // Connection state tracking
@@ -276,7 +276,6 @@
                 clearTimeout(reconnectTimer);
                 reconnectTimer = null;
             }
-            startHeartbeat();
         });
 
         socket.on('connect_error', (error) => {
@@ -305,6 +304,27 @@
                     console.log('[Socket] Max reconnection attempts reached');
                     document.getElementById('connection-status').textContent = 'Connection Failed';
                 }
+            }
+        });
+
+        socket.on('disconnect', (reason) => {
+            console.log('[Socket] Disconnected:', reason);
+            document.getElementById('connection-status').textContent = 'Disconnected';
+            document.getElementById('connection-status').style.color = '#ff0000';
+            feed.innerHTML = '<div class="terminal-line">Disconnected from server. Attempting to reconnect...</div>';
+            
+            if (!isConnecting && !reconnectTimer) {
+                isConnecting = true;
+                const delay = Math.min(RECONNECT_DELAY * Math.pow(2, reconnectAttempts), MAX_RECONNECT_DELAY);
+                console.log(`[Socket] Scheduling reconnect in ${delay}ms`);
+                reconnectTimer = setTimeout(() => {
+                    isConnecting = false;
+                    reconnectTimer = null;
+                    if (!socket.connected) {
+                        console.log('[Socket] Attempting scheduled reconnection...');
+                        socket.connect();
+                    }
+                }, delay);
             }
         });
 
