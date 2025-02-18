@@ -263,10 +263,13 @@ socketio.init_app(
     engineio_logger_kwargs={'level': logging.INFO},
     namespace='/',  # Explicitly set default namespace
     allow_upgrades=True,  # Enable upgrades for WebSocket
-    initial_packet_timeout=5,
-    connect_timeout=5,
+    initial_packet_timeout=10,  # Increase initial packet timeout
+    connect_timeout=10,  # Increase connect timeout
     upgrades=['websocket'],  # Allow WebSocket upgrades
-    allow_reconnection=True
+    allow_reconnection=True,
+    json=True,  # Enable JSON support
+    handle_sigint=False,  # Let gunicorn handle signals
+    max_buffer_size=1024 * 1024  # 1MB buffer size
 )
 
 # Socket connection handler
@@ -279,34 +282,62 @@ def handle_connect():
             logger.error("No session ID found for connection")
             return False
             
+        # Wait briefly for Engine.IO socket to be ready
+        max_retries = 3
+        retry_count = 0
+        socket = None
+        
+        while retry_count < max_retries:
+            if hasattr(socketio.server, 'eio'):
+                socket = socketio.server.eio.sockets.get(sid)
+                if socket:
+                    break
+            retry_count += 1
+            eventlet.sleep(0.1)
+            
+        if not socket:
+            logger.error(f"No Engine.IO socket found for {sid} after {retry_count} retries")
+            return False
+            
         # Initialize Socket.IO session
         if hasattr(socketio.server, 'manager'):
             try:
-                # Create session without passing sid
+                # Create session
                 socketio.server.manager.initialize()
+                
+                # Add to active connections
+                with connection_lock:
+                    active_connections[sid] = {
+                        'connected_at': time.time(),
+                        'last_heartbeat': time.time(),
+                        'socket': socket
+                    }
+                
+                # Enter room and wrap socket
                 socketio.server.enter_room(sid, sid, namespace='/')
-                
-                # Get the Engine.IO socket
-                socket = socketio.server.eio.sockets.get(sid)
-                if not socket:
-                    logger.error(f"No Engine.IO socket found for {sid}")
-                    return False
-                
-                # Wrap socket with error handling
                 wrapped_socket = wrap_socket(socket)
                 if wrapped_socket:
                     socket_manager.add_socket(sid, wrapped_socket)
                     logger.info(f"New socket connection established: {sid}")
                     
-                    # Emit connection success
-                    try:
-                        socketio.emit('connection_success', {'status': 'connected', 'sid': sid}, room=sid, namespace='/')
-                        eventlet.sleep(0)  # Force immediate emission
-                        return True
-                    except Exception as e:
-                        logger.error(f"Error sending connection success: {e}")
-                        cleanup_socket(sid, wrapped_socket)
-                        return False
+                    # Emit connection success with retry
+                    max_emit_retries = 3
+                    emit_retry_count = 0
+                    while emit_retry_count < max_emit_retries:
+                        try:
+                            socketio.emit('connection_success', 
+                                        {'status': 'connected', 'sid': sid}, 
+                                        room=sid, 
+                                        namespace='/')
+                            eventlet.sleep(0)  # Force immediate emission
+                            return True
+                        except Exception as e:
+                            emit_retry_count += 1
+                            if emit_retry_count == max_emit_retries:
+                                logger.error(f"Failed to emit connection success after {max_emit_retries} attempts: {e}")
+                                cleanup_socket(sid, wrapped_socket)
+                                return False
+                            eventlet.sleep(0.1)
                     
             except Exception as e:
                 logger.error(f"Error initializing Socket.IO session for {sid}: {e}")
