@@ -262,10 +262,10 @@ socketio.init_app(
     async_handlers_kwargs={'async_mode': 'eventlet'},
     engineio_logger_kwargs={'level': logging.INFO},
     namespace='/',  # Explicitly set default namespace
-    allow_upgrades=False,  # Disable upgrades to prevent race conditions
-    initial_packet_timeout=5,  # Reduce initial packet timeout
+    allow_upgrades=True,  # Enable upgrades for WebSocket
+    initial_packet_timeout=5,
     connect_timeout=5,
-    upgrades=[],  # Disable all upgrades
+    upgrades=['websocket'],  # Allow WebSocket upgrades
     allow_reconnection=True
 )
 
@@ -282,8 +282,8 @@ def handle_connect():
         # Initialize Socket.IO session
         if hasattr(socketio.server, 'manager'):
             try:
-                # Create session
-                socketio.server.manager.initialize(sid)
+                # Create session without passing sid
+                socketio.server.manager.initialize()
                 socketio.server.enter_room(sid, sid, namespace='/')
                 
                 # Get the Engine.IO socket
