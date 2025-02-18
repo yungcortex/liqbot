@@ -61,22 +61,25 @@ def handle_socket_error(socket, e):
 
 def wrap_socket(sock):
     """Wrap a socket with error handling"""
-    if not sock or not hasattr(sock, 'send') or not hasattr(sock, 'close'):
+    if not sock:
         return sock
         
-    _send = sock.send
-    _close = sock.close
+    # Store original methods
+    _send = getattr(sock, 'send', None)
+    _close = getattr(sock, 'close', None)
+    _shutdown = getattr(sock, 'shutdown', None)
     
     def safe_send(data, *args, **kwargs):
+        if not _send:
+            return 0
         try:
-            if hasattr(sock, 'closed') and sock.closed:
+            if getattr(sock, 'closed', False):
                 return 0
-            if hasattr(sock, 'fileno'):
-                try:
-                    if sock.fileno() == -1:
-                        return 0
-                except Exception:
+            try:
+                if hasattr(sock, 'fileno') and sock.fileno() == -1:
                     return 0
+            except (IOError, OSError):
+                return 0
             return _send(data, *args, **kwargs)
         except Exception as e:
             if not handle_socket_error(sock, e):
@@ -84,19 +87,18 @@ def wrap_socket(sock):
             return 0
             
     def safe_close(*args, **kwargs):
+        if not _close:
+            return
         try:
-            if hasattr(sock, 'closed') and sock.closed:
+            if getattr(sock, 'closed', False):
                 return
                 
-            # Only attempt shutdown if socket is still valid
-            if hasattr(sock, 'fileno'):
+            # Only attempt shutdown if we have the method and socket is valid
+            if _shutdown:
                 try:
-                    fileno = sock.fileno()
-                    if fileno != -1:
+                    if hasattr(sock, 'fileno') and sock.fileno() != -1:
                         try:
-                            # Use raw socket shutdown
-                            import socket as socket_lib
-                            sock.shutdown(socket_lib.SHUT_RDWR)
+                            _shutdown(socket.SHUT_RDWR)
                         except Exception as e:
                             if not isinstance(e, OSError) or e.errno != errno.ENOTCONN:
                                 logger.warning(f"Error during socket shutdown: {e}")
@@ -105,7 +107,7 @@ def wrap_socket(sock):
             
             # Close the socket
             try:
-                return _close()
+                _close()
             except Exception as e:
                 if not handle_socket_error(sock, e):
                     logger.error(f"Error in safe_close: {e}")
@@ -113,8 +115,12 @@ def wrap_socket(sock):
         except Exception as e:
             logger.error(f"Unexpected error in safe_close: {e}")
             
-    sock.send = safe_send
-    sock.close = safe_close
+    # Only replace methods if they exist
+    if _send:
+        sock.send = safe_send
+    if _close:
+        sock.close = safe_close
+        
     return sock
 
 def cleanup_socket(sid, socket):
@@ -130,7 +136,7 @@ def cleanup_socket(sid, socket):
             return
             
         # Check if socket is already closed
-        if hasattr(socket, 'closed') and socket.closed:
+        if getattr(socket, 'closed', False):
             logger.warning(f"Socket {sid} is already closed")
             return
             
@@ -150,14 +156,11 @@ def cleanup_socket(sid, socket):
         if hasattr(socket, 'close'):
             try:
                 # Check if socket is still valid before attempting shutdown
-                if hasattr(socket, 'fileno'):
+                if hasattr(socket, 'shutdown') and hasattr(socket, 'fileno'):
                     try:
-                        fileno = socket.fileno()
-                        if fileno != -1:
+                        if socket.fileno() != -1:
                             try:
-                                # Use raw socket shutdown
-                                import socket as socket_lib
-                                socket.shutdown(socket_lib.SHUT_RDWR)
+                                socket.shutdown(socket.SHUT_RDWR)
                             except Exception as e:
                                 handle_socket_error(socket, e)
                     except Exception:
@@ -230,13 +233,12 @@ def socket_middleware(wsgi_app):
         # Only wrap valid sockets
         if 'eventlet.input' in environ and hasattr(environ['eventlet.input'], 'socket'):
             sock = environ['eventlet.input'].socket
-            if sock and not (hasattr(sock, 'closed') and sock.closed):
+            if sock and not getattr(sock, 'closed', False):
                 # Set socket options if available
                 try:
-                    import socket as socket_lib
                     if hasattr(sock, 'setsockopt'):
-                        # Use TCP_NODELAY from socket library
-                        sock.setsockopt(socket_lib.IPPROTO_TCP, socket_lib.TCP_NODELAY, 1)
+                        # Use socket constants from eventlet's socket
+                        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                 except Exception as e:
                     logger.warning(f"Could not set socket options: {e}")
                 environ['eventlet.input'].socket = wrap_socket(sock)
@@ -251,51 +253,51 @@ socketio.init_app(
     app,
     async_mode='eventlet',
     cors_allowed_origins=["https://liqbot-038f.onrender.com"],
-    ping_timeout=20000,  # Increased ping timeout
-    ping_interval=10000,  # Increased ping interval
-    manage_session=False,  # Disable session management
+    ping_timeout=20000,
+    ping_interval=10000,
+    manage_session=False,
     message_queue=None,
     always_connect=True,
     transports=['websocket'],
-    cookie=None,  # Disable cookies
+    cookie=None,
     logger=True,
     engineio_logger=True,
     async_handlers=True,
     monitor_clients=True,
-    upgrade_timeout=20000,  # Further increased upgrade timeout
-    max_http_buffer_size=1024 * 1024,  # 1MB buffer size
-    websocket_ping_interval=5000,  # Reduced websocket ping interval
-    websocket_ping_timeout=10000,  # Increased websocket ping timeout
+    upgrade_timeout=20000,
+    max_http_buffer_size=1024 * 1024,
+    websocket_ping_interval=5000,
+    websocket_ping_timeout=10000,
     websocket_max_message_size=1024 * 1024,
     cors_credentials=False,
     cors_headers=['Content-Type'],
     cors_allowed_methods=['GET', 'POST', 'OPTIONS'],
-    close_timeout=30000,  # Further increased close timeout
+    close_timeout=30000,
     max_queue_size=100,
     reconnection=True,
-    reconnection_attempts=3,  # Reduced reconnection attempts
-    reconnection_delay=2000,  # Increased reconnection delay
-    reconnection_delay_max=10000,  # Increased max reconnection delay
-    max_retries=3,  # Reduced max retries
-    retry_delay=2000,  # Increased retry delay
-    retry_delay_max=10000,  # Increased max retry delay
-    ping_interval_grace_period=5000,  # Increased grace period
+    reconnection_attempts=3,
+    reconnection_delay=2000,
+    reconnection_delay_max=10000,
+    max_retries=3,
+    retry_delay=2000,
+    retry_delay_max=10000,
+    ping_interval_grace_period=5000,
     async_handlers_kwargs={'async_mode': 'eventlet'},
     engineio_logger_kwargs={'level': logging.INFO},
     namespace='/',
-    allow_upgrades=True,
-    initial_packet_timeout=20,  # Increased initial packet timeout
-    connect_timeout=20,  # Increased connect timeout
-    upgrades=['websocket'],
+    allow_upgrades=False,  # Disable upgrades temporarily
+    initial_packet_timeout=20,
+    connect_timeout=20,
+    upgrades=[],  # Empty upgrades list
     allow_reconnection=True,
     json=True,
     handle_sigint=False,
     max_buffer_size=1024 * 1024,
-    always_connect_same_sid=False,  # Prevent sid reuse
-    max_decode_packets=50,  # Limit packet decoding
-    max_encode_packets=50,  # Limit packet encoding
-    http_compression=True,  # Enable HTTP compression
-    compression_threshold=1024  # Compression threshold
+    always_connect_same_sid=False,
+    max_decode_packets=50,
+    max_encode_packets=50,
+    http_compression=True,
+    compression_threshold=1024
 )
 
 # Socket connection handler
