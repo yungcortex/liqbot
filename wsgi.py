@@ -92,12 +92,11 @@ def wrap_socket(sock):
             if getattr(sock, 'closed', False):
                 return
                 
-            # Just close the socket without shutdown
+            # Just close the socket without any cleanup
             try:
                 _close()
             except Exception as e:
-                if not handle_socket_error(sock, e):
-                    logger.error(f"Error in safe_close: {e}")
+                logger.error(f"Error in safe_close: {e}")
                 
         except Exception as e:
             logger.error(f"Unexpected error in safe_close: {e}")
@@ -142,10 +141,10 @@ def cleanup_socket(sid, socket):
         # Close socket safely
         if hasattr(socket, 'close'):
             try:
-                # Just close the socket without shutdown
+                # Just close the socket without any cleanup
                 socket.close()
             except Exception as e:
-                handle_socket_error(socket, e)
+                logger.error(f"Error closing socket: {e}")
             
         # Remove from server
         try:
@@ -234,7 +233,7 @@ socketio.init_app(
     manage_session=False,
     message_queue=None,
     always_connect=True,
-    transports=['websocket'],
+    transports=['websocket'],  # Only use WebSocket transport
     cookie=None,
     logger=True,
     engineio_logger=True,
@@ -261,10 +260,10 @@ socketio.init_app(
     async_handlers_kwargs={'async_mode': 'eventlet'},
     engineio_logger_kwargs={'level': logging.INFO},
     namespace='/',
-    allow_upgrades=True,
+    allow_upgrades=False,  # Disable upgrades since we're using WebSocket only
     initial_packet_timeout=20,
     connect_timeout=20,
-    upgrades=['websocket'],
+    upgrades=[],  # Empty upgrades list
     allow_reconnection=True,
     json=True,
     handle_sigint=False,
@@ -273,8 +272,7 @@ socketio.init_app(
     max_decode_packets=50,
     max_encode_packets=50,
     http_compression=True,
-    compression_threshold=1024,
-    websocket_class=websocket.WebSocket  # Use eventlet's WebSocket class
+    compression_threshold=1024
 )
 
 # Socket connection handler
@@ -298,7 +296,7 @@ def handle_connect():
                 if socket:
                     break
             retry_count += 1
-            eventlet.sleep(0.2)  # Longer sleep between retries
+            eventlet.sleep(0.2)
             
         if not socket:
             logger.error(f"No Engine.IO socket found for {sid} after {retry_count} retries")
@@ -327,29 +325,17 @@ def handle_connect():
                     socket_manager.add_socket(sid, wrapped_socket)
                     logger.info(f"New socket connection established: {sid}")
                     
-                    # Emit connection success with retry
-                    max_emit_retries = 3
-                    emit_retry_count = 0
-                    success = False
-                    
-                    while emit_retry_count < max_emit_retries and not success:
-                        try:
-                            socketio.emit('connection_success', 
-                                        {'status': 'connected', 'sid': sid}, 
-                                        room=sid, 
-                                        namespace='/')
-                            eventlet.sleep(0)  # Force immediate emission
-                            success = True
-                        except Exception as e:
-                            emit_retry_count += 1
-                            logger.warning(f"Retry {emit_retry_count}/{max_emit_retries} failed: {e}")
-                            if emit_retry_count == max_emit_retries:
-                                logger.error(f"Failed to emit connection success after {max_emit_retries} attempts")
-                                cleanup_socket(sid, wrapped_socket)
-                                return False
-                            eventlet.sleep(0.2)  # Longer sleep between retries
-                    
-                    return True
+                    # Emit connection success immediately
+                    try:
+                        socketio.emit('connection_success', 
+                                    {'status': 'connected', 'sid': sid}, 
+                                    room=sid, 
+                                    namespace='/')
+                        return True
+                    except Exception as e:
+                        logger.error(f"Error emitting connection success: {e}")
+                        cleanup_socket(sid, wrapped_socket)
+                        return False
                     
             except Exception as e:
                 logger.error(f"Error initializing Socket.IO session for {sid}: {e}")
