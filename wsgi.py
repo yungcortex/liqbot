@@ -19,7 +19,6 @@ socketio.init_app(
     cors_allowed_origins=["https://liqbot-038f.onrender.com"],
     ping_timeout=60,
     ping_interval=25,
-    max_http_buffer_size=1e6,
     manage_session=False,
     message_queue=None,
     always_connect=True,
@@ -30,10 +29,10 @@ socketio.init_app(
     async_handlers=False,
     monitor_clients=False,
     upgrade_timeout=15000,
-    max_http_buffer_size=1e6,
+    max_http_buffer_size=1024 * 1024,  # 1MB
     websocket_ping_interval=10,
     websocket_ping_timeout=30,
-    websocket_max_message_size=1e6,
+    websocket_max_message_size=1024 * 1024,  # 1MB
     cors_credentials=False,
     cors_headers=['Content-Type']
 )
