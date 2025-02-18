@@ -34,35 +34,35 @@ socketio = SocketIO(
     app,
     cors_allowed_origins=["https://liqbot-038f.onrender.com", "http://localhost:*"],
     async_mode='eventlet',
-    logger=False,
-    engineio_logger=False,
-    ping_timeout=5,
+    logger=True,
+    engineio_logger=True,
+    ping_timeout=60,
     ping_interval=25,
     max_http_buffer_size=1e6,
-    manage_session=True,
-    cookie=True,
+    manage_session=False,
+    cookie=None,
     always_connect=True,
-    transports=['websocket'],
-    upgrade_timeout=1000,
+    transports=['websocket', 'polling'],
+    upgrade_timeout=20000,
     max_queue_size=100,
     json=json,
-    async_handlers=True,
-    reconnection=True,
-    reconnection_attempts=5,
-    reconnection_delay=1000,
-    reconnection_delay_max=5000,
-    randomization_factor=0.5,
-    handle_sigint=False
+    cors_credentials=True,
+    async_handlers=False,
+    monitor_clients=False,
+    allow_upgrades=True,
+    http_compression=True,
+    compression_threshold=1024
 )
 
-# Configure CORS with more specific settings
+# Configure CORS with more permissive settings
 CORS(app, resources={
-    r"/socket.io/*": {
+    r"/*": {
         "origins": ["https://liqbot-038f.onrender.com", "http://localhost:*"],
         "methods": ["GET", "POST", "OPTIONS"],
-        "allow_headers": ["Content-Type"],
+        "allow_headers": ["*"],
+        "expose_headers": ["*"],
         "supports_credentials": True,
-        "max_age": 3600
+        "send_wildcard": True
     }
 })
 
@@ -89,11 +89,10 @@ def handle_connect():
         transport = request.environ.get('wsgi.url_scheme', 'unknown')
         logger.info(f"Client connected - SID: {sid}, Transport: {transport}")
         # Send initial stats immediately after connection
-        emit('stats_update', latest_stats, room=sid)
-        emit('connection_success', {'status': 'connected', 'sid': sid}, room=sid)
+        emit('stats_update', latest_stats)
+        emit('connection_success', {'status': 'connected', 'sid': sid})
     except Exception as e:
         logger.error(f"Error in handle_connect: {e}")
-        emit('connection_error', {'error': str(e)}, room=request.sid)
 
 @socketio.on('disconnect')
 def handle_disconnect():
@@ -101,7 +100,6 @@ def handle_disconnect():
     try:
         sid = request.sid
         logger.info(f"Client disconnected - SID: {sid}")
-        socketio.server.disconnect(sid)
     except Exception as e:
         logger.error(f"Error in handle_disconnect: {e}")
 
@@ -111,8 +109,6 @@ def default_error_handler(e):
     try:
         sid = request.sid if hasattr(request, 'sid') else 'Unknown'
         logger.error(f"Socket.IO error for SID {sid}: {str(e)}")
-        if hasattr(request, 'sid'):
-            emit('error', {'error': str(e)}, room=request.sid)
     except Exception as error:
         logger.error(f"Error in error handler: {error}")
 
@@ -212,8 +208,11 @@ if __name__ == '__main__':
         debug=False,
         use_reloader=False,
         log_output=True,
-        ping_timeout=5,
+        ping_timeout=60,
         ping_interval=25,
         max_http_buffer_size=1e6,
-        cors_allowed_origins=["https://liqbot-038f.onrender.com", "http://localhost:*"]
+        cors_allowed_origins=["https://liqbot-038f.onrender.com", "http://localhost:*"],
+        allow_upgrades=True,
+        http_compression=True,
+        compression_threshold=1024
     ) 
