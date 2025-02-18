@@ -251,6 +251,11 @@
         let isConnecting = false;
         let reconnectTimer = null;
 
+        // Debug logging for events
+        socket.onAny((eventName, ...args) => {
+            console.log(`Received event: ${eventName}`, args);
+        });
+
         // Connection event handlers with improved error handling
         socket.on('connect', () => {
             console.log('Connected to server');
@@ -346,27 +351,38 @@
         const feed = document.getElementById('liquidation-feed');
         
         socket.on('stats_update', (data) => {
-            console.log('Stats update:', data);
-            for (const [symbol, stats] of Object.entries(data)) {
-                const lower = symbol.toLowerCase();
-                updateElementWithGlitch(`${lower}-longs`, stats.longs);
-                updateElementWithGlitch(`${lower}-shorts`, stats.shorts);
-                updateElementWithGlitch(`${lower}-total`, formatNumber(stats.total_value));
+            console.log('Stats update received:', data);
+            try {
+                for (const [symbol, stats] of Object.entries(data)) {
+                    const lower = symbol.toLowerCase();
+                    updateElementWithGlitch(`${lower}-longs`, stats.longs);
+                    updateElementWithGlitch(`${lower}-shorts`, stats.shorts);
+                    updateElementWithGlitch(`${lower}-total`, formatNumber(stats.total_value));
+                }
+            } catch (error) {
+                console.error('Error processing stats update:', error);
             }
         });
 
         socket.on('liquidation', (data) => {
-            console.log('Liquidation event:', data);
-            const feed = document.getElementById('liquidation-feed');
-            const direction = data.side === 'LONG' ? 'long' : 'short';
-            const line = `
-                <div class="terminal-line glitch-animation">
-                    <span class="${direction}">${data.symbol} ${data.side}</span>
-                    ${data.amount.toFixed(3)} @ $${data.price.toFixed(2)}
-                    = $${data.value.toFixed(2)}
-                </div>
-            `;
-            feed.innerHTML = line + feed.innerHTML;
+            console.log('Liquidation event received:', data);
+            try {
+                const feed = document.getElementById('liquidation-feed');
+                const direction = data.side === 'LONG' ? 'long' : 'short';
+                const line = `
+                    <div class="terminal-line glitch-animation">
+                        <span class="${direction}">${data.symbol} ${data.side}</span>
+                        ${data.amount.toFixed(3)} @ $${data.price.toFixed(2)}
+                        = $${data.value.toFixed(2)}
+                    </div>
+                `;
+                feed.innerHTML = line + feed.innerHTML;
+
+                // Trigger stats refresh
+                socket.emit('get_stats');
+            } catch (error) {
+                console.error('Error processing liquidation event:', error);
+            }
         });
 
         function formatNumber(num) {
