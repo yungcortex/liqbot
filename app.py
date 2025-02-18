@@ -32,26 +32,28 @@ app.config['PROPAGATE_EXCEPTIONS'] = True
 # Initialize SocketIO with optimized settings
 socketio = SocketIO(
     app,
-    cors_allowed_origins="*",  # Allow all origins temporarily
+    cors_allowed_origins="*",
     async_mode='eventlet',
     logger=True,
     engineio_logger=True,
-    ping_timeout=60,
-    ping_interval=25,
-    manage_session=False,  # Disable session management
-    cookie=None,  # Disable cookies
+    ping_timeout=20,
+    ping_interval=10,
+    manage_session=False,
+    cookie=None,
     always_connect=True,
-    transports=['polling', 'websocket'],  # Enable both transports
-    websocket=True,  # Enable WebSocket
-    upgrade_timeout=10000,
+    transports=['polling'],  # Start with polling only
+    websocket=False,  # Disable WebSocket for now
+    upgrade_timeout=5000,
     max_queue_size=100,
     json=json,
-    cors_credentials=False,  # Disable CORS credentials
+    cors_credentials=False,
     async_handlers=True,
     monitor_clients=True,
-    allow_upgrades=True,  # Allow upgrades
+    allow_upgrades=False,  # Disable upgrades
     http_compression=True,
-    compression_threshold=1024
+    compression_threshold=1024,
+    max_http_buffer_size=1e6,
+    verify_session=False
 )
 
 # Configure CORS with simpler settings
@@ -60,7 +62,8 @@ CORS(app, resources={
         "origins": "*",
         "methods": ["GET", "POST", "OPTIONS"],
         "allow_headers": ["*"],
-        "supports_credentials": False
+        "supports_credentials": False,
+        "max_age": 1800
     }
 })
 
@@ -203,10 +206,11 @@ if __name__ == '__main__':
         debug=False,
         use_reloader=False,
         log_output=True,
-        ping_timeout=60,
-        ping_interval=25,
+        ping_timeout=20,
+        ping_interval=10,
         cors_allowed_origins="*",
-        websocket=True,
-        allow_upgrades=True,
-        http_compression=True
+        websocket=False,
+        allow_upgrades=False,
+        http_compression=True,
+        max_http_buffer_size=1e6
     ) 
