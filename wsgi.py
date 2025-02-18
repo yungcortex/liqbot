@@ -108,6 +108,8 @@ def cleanup_socket(sid, socket):
         
         if socket:
             try:
+                if hasattr(socket, 'ws') and socket.ws:
+                    socket.ws.close()
                 if not getattr(socket, 'closed', False):
                     socket.close()
             except Exception as e:
@@ -180,25 +182,26 @@ application.wsgi_app = socket_middleware(application.wsgi_app)
 socketio.init_app(
     app,
     async_mode='eventlet',
-    cors_allowed_origins=["https://liqbot-038f.onrender.com", "http://liqbot-038f.onrender.com", "https://www.liqbot-038f.onrender.com", "http://www.liqbot-038f.onrender.com"],
-    ping_timeout=5000,
-    ping_interval=2500,
+    cors_allowed_origins=["https://liqbot-038f.onrender.com", "http://liqbot-038f.onrender.com", 
+                         "https://www.liqbot-038f.onrender.com", "http://www.liqbot-038f.onrender.com"],
+    ping_timeout=60000,
+    ping_interval=25000,
     manage_session=True,
     message_queue=None,
     always_connect=True,
-    transports=['websocket', 'polling'],
+    transports=['websocket'],  # Only use WebSocket transport
     cookie=None,
     logger=True,
     engineio_logger=True,
     async_handlers=True,
     monitor_clients=True,
-    upgrade_timeout=5000,
+    upgrade_timeout=60000,
     max_http_buffer_size=1024 * 1024,
-    websocket_ping_interval=2500,
-    websocket_ping_timeout=5000,
+    websocket_ping_interval=25000,
+    websocket_ping_timeout=60000,
     cors_credentials=True,
     cors_headers=['Content-Type', 'X-Requested-With'],
-    close_timeout=5000,
+    close_timeout=60000,
     max_queue_size=100,
     reconnection=True,
     reconnection_attempts=float('inf'),
@@ -207,7 +210,7 @@ socketio.init_app(
     max_retries=float('inf'),
     retry_delay=1000,
     retry_delay_max=5000,
-    ping_interval_grace_period=1000,
+    ping_interval_grace_period=5000,
     allow_upgrades=True,
     json=True,
     http_compression=True,

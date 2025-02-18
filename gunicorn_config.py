@@ -12,20 +12,21 @@ bind = f"0.0.0.0:{os.environ.get('PORT', '10000')}"
 backlog = 2048
 
 # Worker processes
-workers = 1
+workers = 1  # Keep single worker for WebSocket
 worker_class = "eventlet"
 worker_connections = 1000
 threads = 1
 
 # Timeouts
-timeout = 120
-graceful_timeout = 30
+timeout = 300  # Increased timeout
+graceful_timeout = 60
 keepalive = 5
 
 # Logging
 accesslog = "-"
 errorlog = "-"
 loglevel = "info"
+access_log_format = '%(h)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s "%(f)s" "%(a)s"'
 
 # SSL
 keyfile = None
@@ -46,6 +47,11 @@ umask = 0
 user = None
 group = None
 tmp_upload_dir = None
+
+# Worker settings
+max_requests = 0  # Disable max requests
+max_requests_jitter = 0
+worker_tmp_dir = None
 
 # Worker lifecycle
 def on_starting(server):
@@ -73,6 +79,7 @@ def post_fork(server, worker):
             app = worker.app.wsgi
             if hasattr(app, 'socketio'):
                 app.socketio.server.eio.clients = {}
+                app.socketio.server.disconnect()
     except Exception as e:
         logger.error("Error in post_fork: %s", e)
 
@@ -85,25 +92,23 @@ def worker_int(worker):
     """Handle worker interruption signals."""
     logger.info("Worker received INT or QUIT signal")
     try:
-        # Get the current eventlet hub
-        hub = eventlet.hubs.get_hub()
-        if hub is not None:
-            # Stop accepting new connections
-            hub.abort()
-            # Close all existing sockets
-            if hasattr(hub, 'sockets'):
-                for sock in hub.sockets.values():
-                    try:
-                        sock.close()
-                    except Exception:
-                        pass
+        if hasattr(worker, 'app') and hasattr(worker.app, 'wsgi'):
+            app = worker.app.wsgi
+            if hasattr(app, 'socketio'):
+                app.socketio.server.disconnect()
     except Exception as e:
         logger.error("Error in worker_int: %s", e)
 
 def worker_abort(worker):
     """Handle worker abort."""
     logger.info("Worker aborted")
-    worker_int(worker)
+    try:
+        if hasattr(worker, 'app') and hasattr(worker.app, 'wsgi'):
+            app = worker.app.wsgi
+            if hasattr(app, 'socketio'):
+                app.socketio.server.disconnect()
+    except Exception as e:
+        logger.error("Error in worker_abort: %s", e)
 
 def worker_exit(server, worker):
     """Clean up after worker exit."""
@@ -122,8 +127,8 @@ def worker_exit(server, worker):
 
 # WebSocket settings
 websocket_max_message_size = 1024 * 1024  # 1MB
-websocket_ping_interval = 5
-websocket_ping_timeout = 10
+websocket_ping_interval = 25
+websocket_ping_timeout = 60
 websocket_per_message_deflate = True
 
 # Environment settings
@@ -141,15 +146,15 @@ buffer_size = 65535
 worker_class_args = {
     'worker_connections': 1000,
     'websocket_max_message_size': 1024 * 1024,  # 1MB
-    'websocket_ping_interval': 5,
-    'websocket_ping_timeout': 10,
+    'websocket_ping_interval': 25,
+    'websocket_ping_timeout': 60,
     'websocket_per_message_deflate': True,
     'keepalive': 5,
-    'client_timeout': 30,
-    'proxy_protocol': False,
+    'client_timeout': 60,
+    'proxy_protocol': True,
     'proxy_allow_ips': '*',
-    'graceful_timeout': 30,
-    'timeout': 30
+    'graceful_timeout': 60,
+    'timeout': 300
 }
 
 # Eventlet settings
@@ -160,20 +165,9 @@ def on_exit(server):
     """Handle server shutdown."""
     logger.info("Server shutting down")
     try:
-        # Clean up any remaining connections
         if hasattr(server, 'app') and hasattr(server.app, 'wsgi'):
             app = server.app.wsgi
             if hasattr(app, 'socketio'):
-                try:
-                    # Close all socket connections
-                    for client in app.socketio.server.eio.clients.values():
-                        try:
-                            client.close()
-                        except Exception:
-                            pass
-                    # Clear all clients
-                    app.socketio.server.eio.clients.clear()
-                except Exception as e:
-                    logger.error("Error cleaning up SocketIO: %s", e)
+                app.socketio.server.disconnect()
     except Exception as e:
         logger.error("Error in on_exit: %s", e) 

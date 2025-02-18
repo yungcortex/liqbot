@@ -226,12 +226,12 @@
     <script>
         // Socket.IO connection with improved timeout handling
         const socket = io(window.location.origin, {
-            transports: ['websocket', 'polling'],
+            transports: ['websocket'],
             reconnection: true,
             reconnectionAttempts: Infinity,
             reconnectionDelay: 1000,
             reconnectionDelayMax: 5000,
-            timeout: 5000,
+            timeout: 60000,
             autoConnect: true,
             forceNew: true,
             secure: true,
@@ -247,8 +247,8 @@
             timestampRequests: false,
             timestampParam: 't',
             closeOnBeforeunload: true,
-            pingInterval: 2500,
-            pingTimeout: 5000
+            pingInterval: 25000,
+            pingTimeout: 60000
         });
 
         // Connection state tracking
@@ -256,6 +256,8 @@
         let reconnectTimer = null;
         const RECONNECT_DELAY = 1000;
         const MAX_RECONNECT_DELAY = 5000;
+        const MAX_RECONNECT_ATTEMPTS = 10;
+        let reconnectAttempts = 0;
 
         // Debug logging for connection events
         socket.onAny((eventName, ...args) => {
@@ -269,24 +271,12 @@
             document.getElementById('connection-status').style.color = '#00ff00';
             feed.innerHTML = '<div class="terminal-line">Connected to liquidation feed</div>';
             isConnecting = false;
+            reconnectAttempts = 0;
             if (reconnectTimer) {
                 clearTimeout(reconnectTimer);
                 reconnectTimer = null;
             }
             startHeartbeat();
-        });
-
-        socket.on('connection_status', (data) => {
-            console.log('[Socket] Connection status:', data);
-            if (data.status === 'connected') {
-                document.getElementById('connection-status').textContent = 'Connected';
-                document.getElementById('connection-status').style.color = '#00ff00';
-            }
-        });
-
-        socket.on('initial_data', (data) => {
-            console.log('[Socket] Received initial data:', data);
-            updateStats(data);
         });
 
         socket.on('connect_error', (error) => {
@@ -297,37 +287,24 @@
             
             if (!isConnecting && !reconnectTimer) {
                 isConnecting = true;
-                reconnectTimer = setTimeout(() => {
-                    isConnecting = false;
-                    reconnectTimer = null;
-                    if (!socket.connected) {
-                        console.log('[Socket] Attempting reconnection...');
-                        socket.connect();
-                    }
-                }, RECONNECT_DELAY);
-            }
-        });
-
-        socket.on('disconnect', (reason) => {
-            console.log('[Socket] Disconnected:', reason);
-            document.getElementById('connection-status').textContent = 'Disconnected';
-            document.getElementById('connection-status').style.color = '#ff0000';
-            feed.innerHTML = '<div class="terminal-line">Disconnected from server. Attempting to reconnect...</div>';
-            
-            stopHeartbeat();
-            
-            if (!isConnecting && !reconnectTimer) {
-                isConnecting = true;
-                const delay = Math.min(RECONNECT_DELAY, MAX_RECONNECT_DELAY);
-                console.log(`[Socket] Scheduling reconnect in ${delay}ms`);
-                reconnectTimer = setTimeout(() => {
-                    isConnecting = false;
-                    reconnectTimer = null;
-                    if (!socket.connected) {
-                        console.log('[Socket] Attempting scheduled reconnection...');
-                        socket.connect();
-                    }
-                }, delay);
+                reconnectAttempts++;
+                
+                if (reconnectAttempts <= MAX_RECONNECT_ATTEMPTS) {
+                    const delay = Math.min(RECONNECT_DELAY * Math.pow(2, reconnectAttempts - 1), MAX_RECONNECT_DELAY);
+                    console.log(`[Socket] Scheduling reconnect attempt ${reconnectAttempts} in ${delay}ms`);
+                    
+                    reconnectTimer = setTimeout(() => {
+                        isConnecting = false;
+                        reconnectTimer = null;
+                        if (!socket.connected) {
+                            console.log('[Socket] Attempting reconnection...');
+                            socket.connect();
+                        }
+                    }, delay);
+                } else {
+                    console.log('[Socket] Max reconnection attempts reached');
+                    document.getElementById('connection-status').textContent = 'Connection Failed';
+                }
             }
         });
 
@@ -335,7 +312,7 @@
         let heartbeatInterval = null;
         let missedHeartbeats = 0;
         const MAX_MISSED_HEARTBEATS = 3;
-        const HEARTBEAT_INTERVAL = 2500;
+        const HEARTBEAT_INTERVAL = 25000;
 
         function startHeartbeat() {
             stopHeartbeat();
@@ -354,11 +331,7 @@
                         console.log('[Socket] Too many missed heartbeats, reconnecting...');
                         stopHeartbeat();
                         socket.disconnect();
-                        setTimeout(() => {
-                            if (!socket.connected) {
-                                socket.connect();
-                            }
-                        }, RECONNECT_DELAY);
+                        socket.connect();
                     }
                 }
             }, HEARTBEAT_INTERVAL);
