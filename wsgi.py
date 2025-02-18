@@ -233,7 +233,7 @@ socketio.init_app(
     cors_allowed_origins=["https://liqbot-038f.onrender.com"],
     ping_timeout=20,
     ping_interval=10,
-    manage_session=True,
+    manage_session=False,  # Disable session management to prevent ID mismatch
     message_queue=None,
     always_connect=True,
     transports=['websocket'],
@@ -266,8 +266,7 @@ socketio.init_app(
     initial_packet_timeout=5,  # Reduce initial packet timeout
     connect_timeout=5,
     upgrades=[],  # Disable all upgrades
-    allow_reconnection=True,
-    manage_session=False  # Disable session management to prevent ID mismatch
+    allow_reconnection=True
 )
 
 # Socket connection handler
