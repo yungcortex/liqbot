@@ -224,38 +224,36 @@
     </div>
 
     <script>
-        // Socket.IO connection with Render-specific settings
+        // Socket.IO connection with improved timeout handling
         const socket = io('https://liqbot-038f.onrender.com', {
             transports: ['websocket'],
             reconnection: true,
-            reconnectionDelay: 5000,
-            reconnectionDelayMax: 30000,
-            reconnectionAttempts: 5,
-            timeout: 60000,
+            reconnectionDelay: 1000,
+            reconnectionDelayMax: 10000,
+            reconnectionAttempts: Infinity,
+            timeout: 20000,
             autoConnect: true,
-            forceNew: true,
+            forceNew: false,
             secure: true,
             rejectUnauthorized: false,
-            withCredentials: true,
+            withCredentials: false,
             upgrade: false,
             rememberUpgrade: false,
             path: '/socket.io/',
             query: {},
-            extraHeaders: {
-                'X-Requested-With': 'XMLHttpRequest'
-            },
+            extraHeaders: {},
             timestampRequests: true,
             timestampParam: 't',
-            closeOnBeforeunload: true,
-            pingInterval: 25000,
-            pingTimeout: 60000
+            closeOnBeforeunload: false,
+            pingInterval: 10000,
+            pingTimeout: 5000
         });
 
-        // Connection state tracking with longer timeouts
+        // Connection state tracking
         let isConnecting = false;
         let reconnectTimer = null;
-        const RECONNECT_DELAY = 5000;
-        const MAX_RECONNECT_DELAY = 30000;
+        const RECONNECT_DELAY = 2000;
+        const MAX_RECONNECT_DELAY = 10000;
 
         // Debug logging for connection events
         socket.onAny((eventName, ...args) => {
@@ -274,6 +272,7 @@
                 clearTimeout(reconnectTimer);
                 reconnectTimer = null;
             }
+            startHeartbeat(); // Start heartbeat after successful connection
         });
 
         socket.on('connect_error', (error) => {
@@ -301,9 +300,11 @@
             document.getElementById('connection-status').style.color = '#ff0000';
             feed.innerHTML += '<div class="terminal-line">Disconnected from server. Attempting to reconnect...</div>';
             
+            stopHeartbeat(); // Stop heartbeat on disconnect
+            
             if (!isConnecting && !reconnectTimer && reason !== 'io server disconnect' && reason !== 'io client disconnect') {
                 isConnecting = true;
-                let delay = Math.min(RECONNECT_DELAY * (socket.reconnectAttempts || 1), MAX_RECONNECT_DELAY);
+                let delay = Math.min(RECONNECT_DELAY, MAX_RECONNECT_DELAY);
                 console.log(`[Socket] Scheduling reconnect in ${delay}ms`);
                 reconnectTimer = setTimeout(() => {
                     isConnecting = false;
@@ -316,16 +317,14 @@
             }
         });
 
-        // Heartbeat mechanism with longer intervals
+        // Heartbeat mechanism with shorter intervals
         let heartbeatInterval = null;
         let missedHeartbeats = 0;
         const MAX_MISSED_HEARTBEATS = 3;
-        const HEARTBEAT_INTERVAL = 25000;
+        const HEARTBEAT_INTERVAL = 10000;
 
         function startHeartbeat() {
-            if (heartbeatInterval) {
-                clearInterval(heartbeatInterval);
-            }
+            stopHeartbeat(); // Clear any existing interval
             missedHeartbeats = 0;
             
             heartbeatInterval = setInterval(() => {
@@ -337,6 +336,7 @@
                     
                     if (missedHeartbeats >= MAX_MISSED_HEARTBEATS) {
                         console.log('[Socket] Too many missed heartbeats, reconnecting...');
+                        stopHeartbeat();
                         socket.disconnect();
                         setTimeout(() => {
                             if (!socket.connected) {
@@ -348,16 +348,12 @@
             }, HEARTBEAT_INTERVAL);
         }
 
-        // Start heartbeat on connect
-        socket.on('connect', startHeartbeat);
-
-        // Clean up on disconnect
-        socket.on('disconnect', () => {
+        function stopHeartbeat() {
             if (heartbeatInterval) {
                 clearInterval(heartbeatInterval);
                 heartbeatInterval = null;
             }
-        });
+        }
 
         const feed = document.getElementById('liquidation-feed');
         

@@ -182,13 +182,13 @@ def socket_middleware(wsgi_app):
 # Apply middleware
 application.wsgi_app = socket_middleware(application.wsgi_app)
 
-# Initialize Socket.IO with Render-specific settings
+# Initialize Socket.IO with improved timeout settings
 socketio.init_app(
     app,
     async_mode='eventlet',
-    cors_allowed_origins=["https://liqbot-038f.onrender.com", "wss://liqbot-038f.onrender.com"],
-    ping_timeout=60000,  # Increased for Render's environment
-    ping_interval=25000,  # Increased for stability
+    cors_allowed_origins=["https://liqbot-038f.onrender.com"],
+    ping_timeout=5000,
+    ping_interval=10000,
     manage_session=False,
     message_queue=None,
     always_connect=True,
@@ -197,39 +197,39 @@ socketio.init_app(
     logger=True,
     engineio_logger=True,
     async_handlers=True,
-    monitor_clients=False,  # Disabled for Render
-    upgrade_timeout=60000,  # Increased for Render's proxy
+    monitor_clients=False,
+    upgrade_timeout=10000,
     max_http_buffer_size=1024 * 1024,
-    websocket_ping_interval=25000,  # Increased for Render
-    websocket_ping_timeout=60000,  # Increased for Render
+    websocket_ping_interval=10000,
+    websocket_ping_timeout=5000,
     websocket_max_message_size=1024 * 1024,
-    cors_credentials=True,  # Enable credentials for Render
-    cors_headers=['Content-Type', 'X-Requested-With'],
+    cors_credentials=False,
+    cors_headers=['Content-Type'],
     cors_allowed_methods=['GET', 'POST', 'OPTIONS'],
-    close_timeout=60000,  # Increased for Render
+    close_timeout=10000,
     max_queue_size=100,
     reconnection=True,
-    reconnection_attempts=5,
-    reconnection_delay=5000,
-    reconnection_delay_max=30000,
-    max_retries=5,
-    retry_delay=5000,
-    retry_delay_max=30000,
-    ping_interval_grace_period=10000,
+    reconnection_attempts=Infinity,
+    reconnection_delay=1000,
+    reconnection_delay_max=10000,
+    max_retries=Infinity,
+    retry_delay=1000,
+    retry_delay_max=10000,
+    ping_interval_grace_period=2000,
     async_handlers_kwargs={'async_mode': 'eventlet'},
     engineio_logger_kwargs={'level': logging.INFO},
     namespace='/',
     allow_upgrades=False,
-    initial_packet_timeout=60,
-    connect_timeout=60,
+    initial_packet_timeout=20,
+    connect_timeout=20,
     upgrades=[],
     allow_reconnection=True,
     json=True,
     handle_sigint=False,
     max_buffer_size=1024 * 1024,
-    always_connect_same_sid=True,  # Keep same SID for Render
-    max_decode_packets=100,
-    max_encode_packets=100,
+    always_connect_same_sid=False,
+    max_decode_packets=50,
+    max_encode_packets=50,
     http_compression=True,
     compression_threshold=1024
 )
