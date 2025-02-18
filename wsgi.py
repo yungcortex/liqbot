@@ -74,15 +74,9 @@ def wrap_socket(sock):
         try:
             if getattr(sock, 'closed', False):
                 return 0
-            try:
-                if hasattr(sock, 'fileno') and sock.fileno() == -1:
-                    return 0
-            except (IOError, OSError):
-                return 0
             return _send(data, *args, **kwargs)
         except Exception as e:
-            if not handle_socket_error(sock, e):
-                logger.error(f"Error in safe_send: {e}")
+            logger.error(f"Error in safe_send: {e}")
             return 0
             
     def safe_close(*args, **kwargs):
@@ -91,15 +85,9 @@ def wrap_socket(sock):
         try:
             if getattr(sock, 'closed', False):
                 return
-                
-            # Just close the socket without any cleanup
-            try:
-                _close()
-            except Exception as e:
-                logger.error(f"Error in safe_close: {e}")
-                
+            _close()
         except Exception as e:
-            logger.error(f"Unexpected error in safe_close: {e}")
+            logger.error(f"Error in safe_close: {e}")
             
     # Only replace methods if they exist
     if _send:
@@ -118,41 +106,19 @@ def cleanup_socket(sid, socket):
         socket_manager.remove_socket(sid)
         
         if not socket:
-            logger.warning(f"Socket {sid} already removed")
             return
             
         # Check if socket is already closed
         if getattr(socket, 'closed', False):
-            logger.warning(f"Socket {sid} is already closed")
             return
             
-        # Remove from rooms
-        if hasattr(socketio.server, 'rooms'):
-            try:
-                rooms = list(socketio.server.rooms(sid, '/'))
-                for room in rooms:
-                    try:
-                        socketio.server.leave_room(sid, room, '/')
-                    except Exception as e:
-                        logger.warning(f"Error removing from room {room}: {e}")
-            except Exception as e:
-                logger.warning(f"Error getting rooms for {sid}: {e}")
-        
         # Close socket safely
         if hasattr(socket, 'close'):
             try:
-                # Just close the socket without any cleanup
                 socket.close()
             except Exception as e:
                 logger.error(f"Error closing socket: {e}")
-            
-        # Remove from server
-        try:
-            if hasattr(socketio.server, 'eio') and sid in socketio.server.eio.sockets:
-                del socketio.server.eio.sockets[sid]
-        except Exception as e:
-            logger.warning(f"Error removing socket from server: {e}")
-            
+                
     except Exception as e:
         logger.error(f"Error cleaning up socket {sid}: {e}")
 
@@ -209,13 +175,6 @@ def socket_middleware(wsgi_app):
         if 'eventlet.input' in environ and hasattr(environ['eventlet.input'], 'socket'):
             sock = environ['eventlet.input'].socket
             if sock and not getattr(sock, 'closed', False):
-                # Set socket options if available
-                try:
-                    if hasattr(sock, 'setsockopt'):
-                        # Use socket constants from eventlet's socket
-                        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-                except Exception as e:
-                    logger.warning(f"Could not set socket options: {e}")
                 environ['eventlet.input'].socket = wrap_socket(sock)
         return wsgi_app(environ, start_response)
     return middleware
@@ -233,7 +192,7 @@ socketio.init_app(
     manage_session=False,
     message_queue=None,
     always_connect=True,
-    transports=['websocket'],  # Only use WebSocket transport
+    transports=['websocket'],
     cookie=None,
     logger=True,
     engineio_logger=True,
@@ -260,10 +219,10 @@ socketio.init_app(
     async_handlers_kwargs={'async_mode': 'eventlet'},
     engineio_logger_kwargs={'level': logging.INFO},
     namespace='/',
-    allow_upgrades=False,  # Disable upgrades since we're using WebSocket only
+    allow_upgrades=False,
     initial_packet_timeout=20,
     connect_timeout=20,
-    upgrades=[],  # Empty upgrades list
+    upgrades=[],
     allow_reconnection=True,
     json=True,
     handle_sigint=False,
