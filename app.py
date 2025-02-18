@@ -15,7 +15,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 # Configure logging
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,  # Changed from DEBUG to reduce noise
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
@@ -26,33 +26,28 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1, x_
 
 # Configure app
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your_secret_key_here')
-app.config['CORS_SUPPORTS_CREDENTIALS'] = False
-app.config['CORS_EXPOSE_HEADERS'] = ['Content-Range', 'X-Content-Range']
-app.config['DEBUG'] = True
+app.config['DEBUG'] = False  # Changed to False for production
 app.config['PROPAGATE_EXCEPTIONS'] = True
 
-# Initialize CORS with simpler configuration
+# Initialize CORS
 CORS(app, resources={r"/*": {"origins": "*"}})
 
-# Initialize SocketIO with production-ready settings
+# Initialize SocketIO with optimized settings
 socketio = SocketIO(
     app,
     cors_allowed_origins="*",
     async_mode='eventlet',
-    logger=True,
-    engineio_logger=True,
-    ping_timeout=120,
+    logger=False,  # Disabled for production
+    engineio_logger=False,  # Disabled for production
+    ping_timeout=60,  # Reduced from 120
     ping_interval=25,
-    max_http_buffer_size=1e8,
-    async_handlers=True,
-    manage_session=False,
+    max_http_buffer_size=1e6,  # Reduced from 1e8
+    manage_session=True,  # Changed to True
     websocket=True,
-    allow_upgrades=True,
     cookie=None,
     always_connect=True,
-    transports=['polling', 'websocket'],
-    cors_credentials=False,
-    max_queue_size=10
+    transports=['websocket'],  # Only using WebSocket transport
+    max_queue_size=100
 )
 
 # Add parent directory to path to import liquidation_bot
@@ -83,122 +78,93 @@ def after_request(response):
 def handle_connect():
     """Handle client connection"""
     try:
-        with app.app_context():
-            logger.info(f"Client connected via {request.environ.get('wsgi.url_scheme', 'unknown')}")
-            # Send initial stats
-            emit('stats_update', latest_stats)
+        logger.info(f"Client connected: {request.sid}")
+        emit('stats_update', latest_stats)
     except Exception as e:
-        logger.error(f"Error in handle_connect: {e}", exc_info=True)
+        logger.error(f"Error in handle_connect: {e}")
 
 @socketio.on('disconnect')
 def handle_disconnect():
     """Handle client disconnection"""
     try:
-        logger.info("Client disconnected")
+        logger.info(f"Client disconnected: {request.sid}")
     except Exception as e:
-        logger.error(f"Error in handle_disconnect: {e}", exc_info=True)
+        logger.error(f"Error in handle_disconnect: {e}")
 
 @socketio.on('heartbeat')
 def handle_heartbeat():
     """Handle heartbeat messages from clients"""
     try:
-        with app.app_context():
-            emit('heartbeat_response', {'status': 'ok'})
+        emit('heartbeat_response', {'status': 'ok', 'sid': request.sid})
     except Exception as e:
-        logger.error(f"Error in handle_heartbeat: {e}", exc_info=True)
+        logger.error(f"Error in handle_heartbeat: {e}")
 
 @socketio.on('get_stats')
 def handle_get_stats():
     """Handle requests for current statistics"""
     try:
-        with app.app_context():
-            emit('stats_update', latest_stats)
-            logger.debug(f"Sent stats update: {latest_stats}")
+        emit('stats_update', latest_stats)
+        logger.debug(f"Sent stats update: {latest_stats}")
     except Exception as e:
         logger.error(f"Error in handle_get_stats: {e}", exc_info=True)
 
 def emit_update(data, event_type='stats_update'):
     """Emit updates to all connected clients"""
     try:
-        with app.app_context():
-            logger.debug(f"Emitting {event_type}: {data}")
-            if event_type == 'stats_update':
-                for symbol, values in data.items():
-                    if symbol in latest_stats:
-                        latest_stats[symbol].update(values)
-            socketio.emit(event_type, data, namespace='/')
+        if event_type == 'stats_update':
+            for symbol, values in data.items():
+                if symbol in latest_stats:
+                    latest_stats[symbol].update(values)
+        socketio.emit(event_type, data)
     except Exception as e:
-        logger.error(f"Error emitting {event_type}: {e}", exc_info=True)
+        logger.error(f"Error emitting {event_type}: {e}")
 
 def process_liquidation_event(data):
     """Process a liquidation event and emit it to clients"""
     try:
-        with app.app_context():
-            logger.debug(f"Received liquidation data: {data}")
+        # Handle Bybit's data format
+        if isinstance(data, dict):
+            liquidation_data = data.get('data', data)
+        else:
+            logger.error(f"Invalid data format received: {data}")
+            return
             
-            # Handle Bybit's data format
-            if isinstance(data, dict):
-                if 'data' in data:
-                    liquidation_data = data['data']
-                else:
-                    liquidation_data = data
+        # Extract the symbol (remove USDT suffix)
+        symbol = liquidation_data.get('symbol', '').replace('USDT', '')
+        
+        try:
+            amount = float(liquidation_data.get('size', liquidation_data.get('qty', 0)))
+            price = float(liquidation_data.get('price', 0))
+            value = amount * price
+        except (ValueError, TypeError):
+            logger.error(f"Error converting size/price: {liquidation_data}")
+            return
+        
+        side = 'LONG' if liquidation_data.get('side', '').upper() == 'BUY' else 'SHORT'
+        
+        if symbol in latest_stats:
+            if side == 'LONG':
+                latest_stats[symbol]['longs'] += 1
             else:
-                logger.error(f"Invalid data format received: {data}")
-                return
+                latest_stats[symbol]['shorts'] += 1
+            latest_stats[symbol]['total_value'] += value
             
-            # Extract the symbol (remove USDT suffix)
-            symbol = liquidation_data.get('symbol', '').replace('USDT', '')
+            liquidation_event = {
+                'symbol': symbol,
+                'side': side,
+                'amount': amount,
+                'price': price,
+                'value': value,
+                'timestamp': liquidation_data.get('updatedTime', datetime.now().timestamp())
+            }
             
-            # Get the size and price
-            try:
-                # Bybit uses 'size' for amount
-                amount = float(liquidation_data.get('size', liquidation_data.get('qty', 0)))
-                price = float(liquidation_data.get('price', 0))
-                value = amount * price
-            except (ValueError, TypeError):
-                logger.error(f"Error converting size/price: {liquidation_data}")
-                return
-            
-            # Determine if it's a long or short liquidation
-            side = 'LONG' if liquidation_data.get('side', '').upper() == 'BUY' else 'SHORT'
-            
-            logger.info(f"Processing liquidation: {symbol} {side} {amount} @ {price} = ${value}")
-            
-            # Update stats if we have a valid symbol
-            if symbol in latest_stats:
-                # Update the stats
-                if side == 'LONG':
-                    latest_stats[symbol]['longs'] += 1
-                else:
-                    latest_stats[symbol]['shorts'] += 1
-                latest_stats[symbol]['total_value'] += value
-                
-                # First emit the liquidation event
-                liquidation_event = {
-                    'symbol': symbol,
-                    'side': side,
-                    'amount': amount,
-                    'price': price,
-                    'value': value,
-                    'timestamp': liquidation_data.get('updatedTime', datetime.now().timestamp())
-                }
-                
-                logger.debug(f"Emitting liquidation event: {liquidation_event}")
-                socketio.emit('liquidation', liquidation_event)
-                
-                # Then emit the updated stats
-                logger.debug(f"Emitting updated stats: {latest_stats}")
-                socketio.emit('stats_update', latest_stats)
-                
-                logger.info(f"Updated {symbol} stats - Longs: {latest_stats[symbol]['longs']}, Shorts: {latest_stats[symbol]['shorts']}, Total: ${latest_stats[symbol]['total_value']:.2f}")
-            else:
-                logger.warning(f"Received liquidation for unknown symbol: {symbol}")
+            socketio.emit('liquidation', liquidation_event)
+            socketio.emit('stats_update', latest_stats)
     except Exception as e:
-        logger.error(f"Error processing liquidation: {e}", exc_info=True)
+        logger.error(f"Error processing liquidation: {e}")
 
 async def run_liquidation_bot():
     """Run the liquidation bot and forward updates to web clients"""
-    # Set the callback for web updates
     set_web_update_callback(process_liquidation_event)
     
     while True:
@@ -223,18 +189,17 @@ if __name__ == '__main__':
     bot_thread.daemon = True
     bot_thread.start()
     
-    # Run the Flask application with updated settings
+    # Run the Flask application with optimized settings
     socketio.run(
         app,
         host='0.0.0.0',
         port=int(os.environ.get('PORT', 10000)),
-        debug=True,
+        debug=False,
         use_reloader=False,
         log_output=True,
         websocket=True,
-        allow_upgrades=True,
-        ping_timeout=120,
+        ping_timeout=60,
         ping_interval=25,
-        max_http_buffer_size=1e8,
+        max_http_buffer_size=1e6,
         cors_allowed_origins="*"
     ) 
