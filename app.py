@@ -15,7 +15,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,  # Changed from DEBUG to reduce noise
+    level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
@@ -26,28 +26,35 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1, x_
 
 # Configure app
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your_secret_key_here')
-app.config['DEBUG'] = False  # Changed to False for production
+app.config['DEBUG'] = False
 app.config['PROPAGATE_EXCEPTIONS'] = True
 
-# Initialize CORS
-CORS(app, resources={r"/*": {"origins": "*"}})
+# Initialize CORS with specific origins
+CORS(app, resources={
+    r"/*": {
+        "origins": ["https://liqbot-038f.onrender.com", "http://localhost:*"],
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type"]
+    }
+})
 
 # Initialize SocketIO with optimized settings
 socketio = SocketIO(
     app,
-    cors_allowed_origins="*",
+    cors_allowed_origins=["https://liqbot-038f.onrender.com", "http://localhost:*"],
     async_mode='eventlet',
-    logger=False,  # Disabled for production
-    engineio_logger=False,  # Disabled for production
-    ping_timeout=60,  # Reduced from 120
-    ping_interval=25,
-    max_http_buffer_size=1e6,  # Reduced from 1e8
-    manage_session=True,  # Changed to True
-    websocket=True,
-    cookie=None,
+    logger=False,
+    engineio_logger=False,
+    ping_timeout=30,
+    ping_interval=15,
+    max_http_buffer_size=1e6,
+    manage_session=True,
+    cookie=False,
     always_connect=True,
-    transports=['websocket'],  # Only using WebSocket transport
-    max_queue_size=100
+    transports=['websocket', 'polling'],
+    upgrade_timeout=10000,
+    max_queue_size=100,
+    json=json
 )
 
 # Add parent directory to path to import liquidation_bot
@@ -65,21 +72,14 @@ latest_stats = {
 def index():
     return render_template('index.html')
 
-@app.after_request
-def after_request(response):
-    """Add headers to every response."""
-    response.headers.add('Access-Control-Allow-Origin', '*')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
-    response.headers.add('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-    response.headers.add('Cache-Control', 'no-cache')
-    return response
-
 @socketio.on('connect')
 def handle_connect():
     """Handle client connection"""
     try:
-        logger.info(f"Client connected: {request.sid}")
-        emit('stats_update', latest_stats)
+        sid = request.sid
+        transport = request.environ.get('wsgi.url_scheme', 'unknown')
+        logger.info(f"Client connected - SID: {sid}, Transport: {transport}")
+        socketio.emit('stats_update', latest_stats, room=sid)
     except Exception as e:
         logger.error(f"Error in handle_connect: {e}")
 
@@ -87,26 +87,28 @@ def handle_connect():
 def handle_disconnect():
     """Handle client disconnection"""
     try:
-        logger.info(f"Client disconnected: {request.sid}")
+        sid = request.sid
+        logger.info(f"Client disconnected - SID: {sid}")
     except Exception as e:
         logger.error(f"Error in handle_disconnect: {e}")
+
+@socketio.on('error')
+def handle_error(error):
+    """Handle Socket.IO errors"""
+    try:
+        sid = request.sid
+        logger.error(f"Socket.IO error for SID {sid}: {error}")
+    except Exception as e:
+        logger.error(f"Error in handle_error: {e}")
 
 @socketio.on('heartbeat')
 def handle_heartbeat():
     """Handle heartbeat messages from clients"""
     try:
-        emit('heartbeat_response', {'status': 'ok', 'sid': request.sid})
+        sid = request.sid
+        socketio.emit('heartbeat_response', {'status': 'ok', 'sid': sid}, room=sid)
     except Exception as e:
         logger.error(f"Error in handle_heartbeat: {e}")
-
-@socketio.on('get_stats')
-def handle_get_stats():
-    """Handle requests for current statistics"""
-    try:
-        emit('stats_update', latest_stats)
-        logger.debug(f"Sent stats update: {latest_stats}")
-    except Exception as e:
-        logger.error(f"Error in handle_get_stats: {e}", exc_info=True)
 
 def emit_update(data, event_type='stats_update'):
     """Emit updates to all connected clients"""
@@ -115,21 +117,19 @@ def emit_update(data, event_type='stats_update'):
             for symbol, values in data.items():
                 if symbol in latest_stats:
                     latest_stats[symbol].update(values)
-        socketio.emit(event_type, data)
+        socketio.emit(event_type, data, namespace='/')
     except Exception as e:
         logger.error(f"Error emitting {event_type}: {e}")
 
 def process_liquidation_event(data):
     """Process a liquidation event and emit it to clients"""
     try:
-        # Handle Bybit's data format
         if isinstance(data, dict):
             liquidation_data = data.get('data', data)
         else:
             logger.error(f"Invalid data format received: {data}")
             return
             
-        # Extract the symbol (remove USDT suffix)
         symbol = liquidation_data.get('symbol', '').replace('USDT', '')
         
         try:
@@ -158,8 +158,8 @@ def process_liquidation_event(data):
                 'timestamp': liquidation_data.get('updatedTime', datetime.now().timestamp())
             }
             
-            socketio.emit('liquidation', liquidation_event)
-            socketio.emit('stats_update', latest_stats)
+            socketio.emit('liquidation', liquidation_event, namespace='/')
+            socketio.emit('stats_update', latest_stats, namespace='/')
     except Exception as e:
         logger.error(f"Error processing liquidation: {e}")
 
@@ -197,9 +197,8 @@ if __name__ == '__main__':
         debug=False,
         use_reloader=False,
         log_output=True,
-        websocket=True,
-        ping_timeout=60,
-        ping_interval=25,
+        ping_timeout=30,
+        ping_interval=15,
         max_http_buffer_size=1e6,
-        cors_allowed_origins="*"
+        cors_allowed_origins=["https://liqbot-038f.onrender.com", "http://localhost:*"]
     ) 
