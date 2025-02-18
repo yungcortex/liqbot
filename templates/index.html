@@ -224,41 +224,47 @@
     </div>
 
     <script>
-        // Socket.IO connection with improved error handling
+        // Socket.IO connection with Render-specific settings
         const socket = io('https://liqbot-038f.onrender.com', {
             transports: ['websocket'],
             reconnection: true,
-            reconnectionDelay: 1000,
-            reconnectionDelayMax: 5000,
-            reconnectionAttempts: Infinity,
-            timeout: 20000,
+            reconnectionDelay: 5000,
+            reconnectionDelayMax: 30000,
+            reconnectionAttempts: 5,
+            timeout: 60000,
             autoConnect: true,
             forceNew: true,
             secure: true,
             rejectUnauthorized: false,
-            withCredentials: false,
-            upgrade: true,
-            rememberUpgrade: true,
+            withCredentials: true,
+            upgrade: false,
+            rememberUpgrade: false,
             path: '/socket.io/',
             query: {},
-            extraHeaders: {},
+            extraHeaders: {
+                'X-Requested-With': 'XMLHttpRequest'
+            },
             timestampRequests: true,
             timestampParam: 't',
-            closeOnBeforeunload: false
+            closeOnBeforeunload: true,
+            pingInterval: 25000,
+            pingTimeout: 60000
         });
 
-        // Connection state tracking
+        // Connection state tracking with longer timeouts
         let isConnecting = false;
         let reconnectTimer = null;
+        const RECONNECT_DELAY = 5000;
+        const MAX_RECONNECT_DELAY = 30000;
 
-        // Debug logging for events
+        // Debug logging for connection events
         socket.onAny((eventName, ...args) => {
-            console.log(`Received event: ${eventName}`, args);
+            console.log(`[${new Date().toISOString()}] Event: ${eventName}`, args);
         });
 
         // Connection event handlers with improved error handling
         socket.on('connect', () => {
-            console.log('Connected to server');
+            console.log('[Socket] Connected to server');
             document.getElementById('connection-status').textContent = 'Connected';
             document.getElementById('connection-status').style.color = '#00ff00';
             feed.innerHTML = '<div class="terminal-line">Connected to liquidation feed</div>';
@@ -271,7 +277,7 @@
         });
 
         socket.on('connect_error', (error) => {
-            console.error('Connection error:', error);
+            console.error('[Socket] Connection error:', error);
             document.getElementById('connection-status').textContent = 'Connection Error';
             document.getElementById('connection-status').style.color = '#ff0000';
             feed.innerHTML += '<div class="terminal-line">Connection error. Retrying...</div>';
@@ -282,34 +288,39 @@
                     isConnecting = false;
                     reconnectTimer = null;
                     if (!socket.connected) {
+                        console.log('[Socket] Attempting reconnection...');
                         socket.connect();
                     }
-                }, 5000);
+                }, RECONNECT_DELAY);
             }
         });
 
         socket.on('disconnect', (reason) => {
-            console.log('Disconnected:', reason);
+            console.log('[Socket] Disconnected:', reason);
             document.getElementById('connection-status').textContent = 'Disconnected';
             document.getElementById('connection-status').style.color = '#ff0000';
             feed.innerHTML += '<div class="terminal-line">Disconnected from server. Attempting to reconnect...</div>';
             
             if (!isConnecting && !reconnectTimer && reason !== 'io server disconnect' && reason !== 'io client disconnect') {
                 isConnecting = true;
+                let delay = Math.min(RECONNECT_DELAY * (socket.reconnectAttempts || 1), MAX_RECONNECT_DELAY);
+                console.log(`[Socket] Scheduling reconnect in ${delay}ms`);
                 reconnectTimer = setTimeout(() => {
                     isConnecting = false;
                     reconnectTimer = null;
                     if (!socket.connected) {
+                        console.log('[Socket] Attempting scheduled reconnection...');
                         socket.connect();
                     }
-                }, 5000);
+                }, delay);
             }
         });
 
-        // Heartbeat mechanism
+        // Heartbeat mechanism with longer intervals
         let heartbeatInterval = null;
         let missedHeartbeats = 0;
         const MAX_MISSED_HEARTBEATS = 3;
+        const HEARTBEAT_INTERVAL = 25000;
 
         function startHeartbeat() {
             if (heartbeatInterval) {
@@ -325,16 +336,16 @@
                     });
                     
                     if (missedHeartbeats >= MAX_MISSED_HEARTBEATS) {
-                        console.log('Too many missed heartbeats, reconnecting...');
+                        console.log('[Socket] Too many missed heartbeats, reconnecting...');
                         socket.disconnect();
                         setTimeout(() => {
                             if (!socket.connected) {
                                 socket.connect();
                             }
-                        }, 1000);
+                        }, RECONNECT_DELAY);
                     }
                 }
-            }, 10000);
+            }, HEARTBEAT_INTERVAL);
         }
 
         // Start heartbeat on connect

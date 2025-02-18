@@ -182,13 +182,13 @@ def socket_middleware(wsgi_app):
 # Apply middleware
 application.wsgi_app = socket_middleware(application.wsgi_app)
 
-# Initialize Socket.IO with improved settings
+# Initialize Socket.IO with Render-specific settings
 socketio.init_app(
     app,
     async_mode='eventlet',
-    cors_allowed_origins=["https://liqbot-038f.onrender.com"],
-    ping_timeout=20000,
-    ping_interval=10000,
+    cors_allowed_origins=["https://liqbot-038f.onrender.com", "wss://liqbot-038f.onrender.com"],
+    ping_timeout=60000,  # Increased for Render's environment
+    ping_interval=25000,  # Increased for stability
     manage_session=False,
     message_queue=None,
     always_connect=True,
@@ -197,39 +197,39 @@ socketio.init_app(
     logger=True,
     engineio_logger=True,
     async_handlers=True,
-    monitor_clients=True,
-    upgrade_timeout=20000,
+    monitor_clients=False,  # Disabled for Render
+    upgrade_timeout=60000,  # Increased for Render's proxy
     max_http_buffer_size=1024 * 1024,
-    websocket_ping_interval=5000,
-    websocket_ping_timeout=10000,
+    websocket_ping_interval=25000,  # Increased for Render
+    websocket_ping_timeout=60000,  # Increased for Render
     websocket_max_message_size=1024 * 1024,
-    cors_credentials=False,
-    cors_headers=['Content-Type'],
+    cors_credentials=True,  # Enable credentials for Render
+    cors_headers=['Content-Type', 'X-Requested-With'],
     cors_allowed_methods=['GET', 'POST', 'OPTIONS'],
-    close_timeout=30000,
+    close_timeout=60000,  # Increased for Render
     max_queue_size=100,
     reconnection=True,
-    reconnection_attempts=3,
-    reconnection_delay=2000,
-    reconnection_delay_max=10000,
-    max_retries=3,
-    retry_delay=2000,
-    retry_delay_max=10000,
-    ping_interval_grace_period=5000,
+    reconnection_attempts=5,
+    reconnection_delay=5000,
+    reconnection_delay_max=30000,
+    max_retries=5,
+    retry_delay=5000,
+    retry_delay_max=30000,
+    ping_interval_grace_period=10000,
     async_handlers_kwargs={'async_mode': 'eventlet'},
     engineio_logger_kwargs={'level': logging.INFO},
     namespace='/',
     allow_upgrades=False,
-    initial_packet_timeout=20,
-    connect_timeout=20,
+    initial_packet_timeout=60,
+    connect_timeout=60,
     upgrades=[],
     allow_reconnection=True,
     json=True,
     handle_sigint=False,
     max_buffer_size=1024 * 1024,
-    always_connect_same_sid=False,
-    max_decode_packets=50,
-    max_encode_packets=50,
+    always_connect_same_sid=True,  # Keep same SID for Render
+    max_decode_packets=100,
+    max_encode_packets=100,
     http_compression=True,
     compression_threshold=1024
 )
@@ -244,40 +244,26 @@ def handle_connect():
             logger.error("No session ID found for connection")
             return False
             
-        # Wait briefly for Engine.IO socket to be ready
-        max_retries = 5
-        retry_count = 0
-        socket = None
-        
-        while retry_count < max_retries:
-            if hasattr(socketio.server, 'eio'):
-                socket = socketio.server.eio.sockets.get(sid)
-                if socket:
-                    break
-            retry_count += 1
-            eventlet.sleep(0.2)
-            
-        if not socket:
-            logger.error(f"No Engine.IO socket found for {sid} after {retry_count} retries")
-            return False
-            
         # Initialize Socket.IO session
         if hasattr(socketio.server, 'manager'):
             try:
                 # Create session
                 socketio.server.manager.initialize()
                 
-                # Add to active connections first
+                # Get the Engine.IO socket
+                socket = socketio.server.eio.sockets.get(sid)
+                if not socket:
+                    logger.error(f"No Engine.IO socket found for {sid}")
+                    return False
+                
+                # Add to active connections
                 with connection_lock:
                     active_connections[sid] = {
                         'connected_at': time.time(),
                         'last_heartbeat': time.time(),
                         'socket': socket
                     }
-                
-                # Enter room after connection is established
-                socketio.server.enter_room(sid, sid, namespace='/')
-                
+                    
                 # Wrap socket with error handling
                 wrapped_socket = wrap_socket(socket)
                 if wrapped_socket:
@@ -307,7 +293,7 @@ def handle_connect():
             cleanup_socket(sid, socket)
         return False
     
-    return False  # Fallback return
+    return False
 
 @socketio.on('disconnect')
 def handle_disconnect():
@@ -316,10 +302,9 @@ def handle_disconnect():
         sid = request.sid
         if sid:
             logger.info(f"Client disconnecting: {sid}")
-            if hasattr(socketio.server, 'manager'):
-                socketio.server.leave_room(sid, sid, namespace='/')
-                socketio.server.manager.disconnect(sid, '/')
             cleanup_socket(sid, socketio.server.eio.sockets.get(sid))
+            with connection_lock:
+                active_connections.pop(sid, None)
     except Exception as e:
         logger.error(f"Error in handle_disconnect: {e}")
 
