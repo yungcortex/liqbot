@@ -230,7 +230,7 @@
             reconnection: true,
             reconnectionDelay: 1000,
             reconnectionDelayMax: 5000,
-            reconnectionAttempts: 5,
+            reconnectionAttempts: Infinity,
             timeout: 20000,
             autoConnect: true,
             forceNew: true,
@@ -353,39 +353,71 @@
         socket.on('stats_update', (data) => {
             console.log('Stats update received:', data);
             try {
+                if (!data) {
+                    console.error('Received empty stats update');
+                    return;
+                }
+                
                 for (const [symbol, stats] of Object.entries(data)) {
                     const lower = symbol.toLowerCase();
-                    updateElementWithGlitch(`${lower}-longs`, stats.longs);
-                    updateElementWithGlitch(`${lower}-shorts`, stats.shorts);
-                    updateElementWithGlitch(`${lower}-total`, formatNumber(stats.total_value));
+                    console.log(`Updating stats for ${symbol}:`, stats);
+                    
+                    if (stats.longs !== undefined) updateElementWithGlitch(`${lower}-longs`, stats.longs);
+                    if (stats.shorts !== undefined) updateElementWithGlitch(`${lower}-shorts`, stats.shorts);
+                    if (stats.total_value !== undefined) updateElementWithGlitch(`${lower}-total`, formatNumber(stats.total_value));
                 }
             } catch (error) {
-                console.error('Error processing stats update:', error);
+                console.error('Error processing stats update:', error, data);
             }
         });
 
         socket.on('liquidation', (data) => {
             console.log('Liquidation event received:', data);
             try {
+                if (!data || !data.symbol) {
+                    console.error('Received invalid liquidation data:', data);
+                    return;
+                }
+
                 const feed = document.getElementById('liquidation-feed');
                 const direction = data.side === 'LONG' ? 'long' : 'short';
+                
+                const amount = parseFloat(data.amount);
+                const price = parseFloat(data.price);
+                const value = parseFloat(data.value);
+
+                if (isNaN(amount) || isNaN(price) || isNaN(value)) {
+                    console.error('Invalid numeric values in liquidation data:', data);
+                    return;
+                }
+
                 const line = `
                     <div class="terminal-line glitch-animation">
                         <span class="${direction}">${data.symbol} ${data.side}</span>
-                        ${data.amount.toFixed(3)} @ $${data.price.toFixed(2)}
-                        = $${data.value.toFixed(2)}
+                        ${amount.toFixed(3)} @ $${price.toFixed(2)}
+                        = $${value.toFixed(2)}
                     </div>
                 `;
                 feed.innerHTML = line + feed.innerHTML;
 
-                // Trigger stats refresh
-                socket.emit('get_stats');
+                // Limit the number of displayed liquidations
+                const maxLines = 100;
+                const lines = feed.getElementsByClassName('terminal-line');
+                if (lines.length > maxLines) {
+                    for (let i = maxLines; i < lines.length; i++) {
+                        lines[i].remove();
+                    }
+                }
             } catch (error) {
-                console.error('Error processing liquidation event:', error);
+                console.error('Error processing liquidation event:', error, data);
             }
         });
 
         function formatNumber(num) {
+            if (typeof num !== 'number' || isNaN(num)) {
+                console.error('Invalid number for formatting:', num);
+                return '$0.00';
+            }
             return new Intl.NumberFormat('en-US', {
                 style: 'currency',
                 currency: 'USD'
@@ -398,13 +430,21 @@
                 console.error(`Element not found: ${elementId}`);
                 return;
             }
+            
+            if (newValue === undefined || newValue === null) {
+                console.error(`Invalid value for ${elementId}:`, newValue);
+                return;
+            }
+
             console.log(`Updating ${elementId} with value:`, newValue);
             element.classList.add('glitch-animation');
+            
             if (typeof newValue === 'number') {
-                element.textContent = newValue;
-            } else {
                 element.textContent = newValue.toString();
+            } else {
+                element.textContent = newValue;
             }
+            
             setTimeout(() => {
                 element.classList.remove('glitch-animation');
             }, 200);

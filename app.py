@@ -164,8 +164,19 @@ def process_liquidation_event(data):
                 'timestamp': liquidation_data.get('updatedTime', datetime.now().timestamp())
             }
             
-            socketio.emit('liquidation', liquidation_event, namespace='/')
-            socketio.emit('stats_update', latest_stats, namespace='/')
+            # Log the event before emitting
+            logger.info(f"Emitting liquidation event: {liquidation_event}")
+            logger.info(f"Current stats: {latest_stats}")
+            
+            # Emit events with namespace and room specification
+            socketio.emit('liquidation', liquidation_event, namespace='/', broadcast=True)
+            socketio.emit('stats_update', latest_stats, namespace='/', broadcast=True)
+            
+            # Force a flush of the socket
+            try:
+                socketio.sleep(0)
+            except Exception as e:
+                logger.error(f"Error in socket flush: {e}")
     except Exception as e:
         logger.error(f"Error processing liquidation: {e}")
 
