@@ -272,10 +272,10 @@ def handle_connect():
         sid = request.sid
         if not sid:
             logger.error("No session ID found for connection")
-            return
+            return False
             
-        # Wait briefly for socket to be fully initialized
-        max_retries = 3
+        # Wait for socket to be fully initialized with exponential backoff
+        max_retries = 5
         retry_count = 0
         socket = None
         
@@ -285,45 +285,66 @@ def handle_connect():
                 if socket:
                     break
                 retry_count += 1
-                eventlet.sleep(0.1)  # Short sleep between retries
+                wait_time = 0.1 * (2 ** retry_count)  # Exponential backoff
+                eventlet.sleep(wait_time)
+                logger.info(f"Retry {retry_count}/{max_retries} for socket {sid}")
                 
         if not socket:
-            logger.warning(f"No socket found for {sid} after {max_retries} retries")
-            return
+            logger.error(f"No socket found for {sid} after {max_retries} retries")
+            return False
+            
+        # Ensure socket is properly initialized
+        if not hasattr(socket, 'handler') or not socket.handler:
+            logger.error(f"Socket {sid} not properly initialized")
+            return False
             
         # Check if socket is already closed
         if hasattr(socket, 'closed') and socket.closed:
             logger.warning(f"Socket {sid} is already closed")
-            return
+            return False
             
         # Check if socket is still valid
         if hasattr(socket, 'fileno'):
             try:
                 if socket.fileno() == -1:
                     logger.warning(f"Socket {sid} has invalid file descriptor")
-                    return
+                    return False
             except Exception as e:
                 logger.warning(f"Error checking socket validity: {e}")
-                return
+                return False
         
         # Wrap socket with error handling
         wrapped_socket = wrap_socket(socket)
         if wrapped_socket:
             socket_manager.add_socket(sid, wrapped_socket)
-            logger.info(f"New socket connection: {sid}")
+            logger.info(f"New socket connection established: {sid}")
             
-            # Emit initial connection success
-            try:
-                emit('connection_success', {'status': 'connected', 'sid': sid})
-                socketio.sleep(0)  # Force immediate emission
-            except Exception as e:
-                logger.error(f"Error sending connection success: {e}")
-                cleanup_socket(sid, wrapped_socket)
+            # Force socket into connected state
+            if hasattr(socketio.server, 'manager'):
+                socketio.server.manager.set_client_connecting(sid, '/')
+                socketio.server.manager.set_client_connected(sid, '/')
+            
+            # Emit initial connection success with retry
+            max_emit_retries = 3
+            for i in range(max_emit_retries):
+                try:
+                    emit('connection_success', {'status': 'connected', 'sid': sid})
+                    socketio.sleep(0)  # Force immediate emission
+                    return True
+                except Exception as e:
+                    if i == max_emit_retries - 1:
+                        logger.error(f"Failed to send connection success after {max_emit_retries} attempts: {e}")
+                        cleanup_socket(sid, wrapped_socket)
+                        return False
+                    eventlet.sleep(0.1)
             
     except Exception as e:
         logger.error(f"Error in handle_connect: {e}")
         if 'sid' in locals():
             cleanup_socket(sid, None)
+        return False
+    
+    return True
 
 @socketio.on('disconnect')
 def handle_disconnect():

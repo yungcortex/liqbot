@@ -172,10 +172,11 @@ def handle_connect():
     try:
         sid = request.sid
         if not sid:
-            return
+            logger.error("No session ID found for connection")
+            return False
             
-        # Wait briefly for socket to be fully initialized
-        max_retries = 3
+        # Wait for socket to be fully initialized with exponential backoff
+        max_retries = 5
         retry_count = 0
         socket = None
         
@@ -185,37 +186,55 @@ def handle_connect():
                 if socket:
                     break
                 retry_count += 1
-                eventlet.sleep(0.1)  # Short sleep between retries
+                wait_time = 0.1 * (2 ** retry_count)  # Exponential backoff
+                eventlet.sleep(wait_time)
+                logger.info(f"Retry {retry_count}/{max_retries} for socket {sid}")
                 
         if not socket:
-            logger.warning(f"No socket found for {sid} after {max_retries} retries")
-            return
+            logger.error(f"No socket found for {sid} after {max_retries} retries")
+            return False
+            
+        # Ensure socket is properly initialized
+        if not hasattr(socket, 'handler') or not socket.handler:
+            logger.error(f"Socket {sid} not properly initialized")
+            return False
             
         # Check if socket is valid before adding
         if not is_socket_valid(sid):
-            logger.warning(f"Invalid socket for {sid}")
-            return
+            logger.error(f"Invalid socket for {sid}")
+            return False
             
         with connection_lock:
             active_connections[sid] = {
                 'connected_at': time.time(),
-                'last_heartbeat': time.time()
+                'last_heartbeat': time.time(),
+                'socket': socket  # Store socket reference
             }
             
-        # Send initial stats
-        try:
-            emit('stats', {'status': 'connected', 'sid': sid})
-            socketio.sleep(0)  # Force immediate emission
-            logger.info(f"Client connected: {sid}")
-        except Exception as e:
-            logger.error(f"Error sending initial stats: {e}")
-            with connection_lock:
-                active_connections.pop(sid, None)
+        # Send initial stats with retry
+        max_emit_retries = 3
+        for i in range(max_emit_retries):
+            try:
+                emit('stats', {'status': 'connected', 'sid': sid})
+                socketio.sleep(0)  # Force immediate emission
+                logger.info(f"Client connected successfully: {sid}")
+                return True
+            except Exception as e:
+                if i == max_emit_retries - 1:
+                    logger.error(f"Failed to send initial stats after {max_emit_retries} attempts: {e}")
+                    with connection_lock:
+                        active_connections.pop(sid, None)
+                    return False
+                eventlet.sleep(0.1)
+                
     except Exception as e:
         logger.error(f"Error in handle_connect: {e}")
         if 'sid' in locals():
             with connection_lock:
                 active_connections.pop(sid, None)
+        return False
+        
+    return True
 
 @socketio.on('disconnect')
 def handle_disconnect():
