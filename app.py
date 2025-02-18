@@ -186,7 +186,8 @@ def handle_connect():
         
     except Exception as e:
         logger.error(f"Error in handle_connect: {e}")
-        connection_manager.cleanup_connection(sid)
+        if 'sid' in locals():
+            connection_manager.cleanup_connection(sid)
         disconnect()
 
 @socketio.on('disconnect')

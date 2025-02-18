@@ -11,6 +11,7 @@ import weakref
 from eventlet import wsgi, websocket
 from eventlet.green import socket
 import errno
+from flask import request
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
