@@ -1,5 +1,5 @@
 import eventlet
-eventlet.monkey_patch(socket=True, select=True)
+eventlet.monkey_patch()
 
 from app import app, socketio, background_tasks
 import threading
@@ -12,8 +12,20 @@ bot_thread.start()
 # Create the WSGI application
 application = app
 
-# Wrap with Socket.IO
-socketio.init_app(app, async_mode='eventlet')
+# Initialize Socket.IO with improved settings
+socketio.init_app(
+    app,
+    async_mode='eventlet',
+    cors_allowed_origins="*",
+    ping_timeout=120,
+    ping_interval=25,
+    max_http_buffer_size=1e8,
+    manage_session=False,
+    message_queue=None,
+    always_connect=True,
+    transports=['polling', 'websocket'],
+    cookie=None
+)
 
 # For local development
 if __name__ == '__main__':
