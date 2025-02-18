@@ -12,15 +12,15 @@ bind = f"0.0.0.0:{os.environ.get('PORT', '10000')}"
 backlog = 2048
 
 # Worker processes
-workers = 1  # Keep single worker for WebSocket
+workers = 1  # Single worker for WebSocket
 worker_class = "eventlet"
-worker_connections = 1000
+worker_connections = 2000
 threads = 1
+keepalive = 65
 
 # Timeouts
-timeout = 300  # Increased timeout
+timeout = 300
 graceful_timeout = 60
-keepalive = 5
 
 # Logging
 accesslog = "-"
@@ -49,7 +49,7 @@ group = None
 tmp_upload_dir = None
 
 # Worker settings
-max_requests = 0  # Disable max requests
+max_requests = 0
 max_requests_jitter = 0
 worker_tmp_dir = None
 
@@ -71,17 +71,14 @@ def pre_fork(server, worker):
 def post_fork(server, worker):
     """Set up worker after fork."""
     logger.info("Worker spawned (pid: %s)", worker.pid)
-    # Ensure eventlet hub is initialized in worker
+    # Initialize eventlet hub
     eventlet.hubs.use_hub()
+    # Increase file descriptor limit
     try:
-        # Clear any existing connections
-        if hasattr(worker, 'app') and hasattr(worker.app, 'wsgi'):
-            app = worker.app.wsgi
-            if hasattr(app, 'socketio'):
-                app.socketio.server.eio.clients = {}
-                app.socketio.server.disconnect()
+        import resource
+        resource.setrlimit(resource.RLIMIT_NOFILE, (65536, 65536))
     except Exception as e:
-        logger.error("Error in post_fork: %s", e)
+        logger.error(f"Error setting file descriptor limit: {e}")
 
 def pre_exec(server):
     """Pre-exec handler."""
@@ -95,20 +92,20 @@ def worker_int(worker):
         if hasattr(worker, 'app') and hasattr(worker.app, 'wsgi'):
             app = worker.app.wsgi
             if hasattr(app, 'socketio'):
+                # Gracefully disconnect all clients
+                for sid, socket in app.socketio.server.eio.sockets.items():
+                    try:
+                        socket.close()
+                    except Exception:
+                        pass
                 app.socketio.server.disconnect()
     except Exception as e:
-        logger.error("Error in worker_int: %s", e)
+        logger.error(f"Error in worker_int: {e}")
 
 def worker_abort(worker):
     """Handle worker abort."""
     logger.info("Worker aborted")
-    try:
-        if hasattr(worker, 'app') and hasattr(worker.app, 'wsgi'):
-            app = worker.app.wsgi
-            if hasattr(app, 'socketio'):
-                app.socketio.server.disconnect()
-    except Exception as e:
-        logger.error("Error in worker_abort: %s", e)
+    worker_int(worker)
 
 def worker_exit(server, worker):
     """Clean up after worker exit."""
@@ -129,7 +126,7 @@ def worker_exit(server, worker):
 websocket_max_message_size = 1024 * 1024  # 1MB
 websocket_ping_interval = 25
 websocket_ping_timeout = 60
-websocket_per_message_deflate = True
+websocket_per_message_deflate = False  # Disable compression for stability
 
 # Environment settings
 raw_env = [
@@ -144,17 +141,18 @@ buffer_size = 65535
 
 # Worker class args
 worker_class_args = {
-    'worker_connections': 1000,
-    'websocket_max_message_size': 1024 * 1024,  # 1MB
+    'worker_connections': 2000,
+    'websocket_max_message_size': 1024 * 1024,
     'websocket_ping_interval': 25,
     'websocket_ping_timeout': 60,
-    'websocket_per_message_deflate': True,
-    'keepalive': 5,
+    'websocket_per_message_deflate': False,
+    'keepalive': 65,
     'client_timeout': 60,
     'proxy_protocol': True,
     'proxy_allow_ips': '*',
     'graceful_timeout': 60,
-    'timeout': 300
+    'timeout': 300,
+    'backlog': 2048
 }
 
 # Eventlet settings
@@ -168,6 +166,12 @@ def on_exit(server):
         if hasattr(server, 'app') and hasattr(server.app, 'wsgi'):
             app = server.app.wsgi
             if hasattr(app, 'socketio'):
+                # Gracefully disconnect all clients
+                for sid, socket in app.socketio.server.eio.sockets.items():
+                    try:
+                        socket.close()
+                    except Exception:
+                        pass
                 app.socketio.server.disconnect()
     except Exception as e:
-        logger.error("Error in on_exit: %s", e) 
+        logger.error(f"Error in on_exit: {e}") 

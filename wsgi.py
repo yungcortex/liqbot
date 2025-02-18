@@ -68,6 +68,7 @@ def wrap_socket(sock):
     # Store original methods
     _send = getattr(sock, 'send', None)
     _close = getattr(sock, 'close', None)
+    _fileno = getattr(sock, 'fileno', None)
     
     def safe_send(data, *args, **kwargs):
         try:
@@ -75,22 +76,42 @@ def wrap_socket(sock):
                 return 0
             return _send(data, *args, **kwargs)
         except Exception as e:
-            logger.error(f"Error in safe_send: {e}")
+            if isinstance(e, (IOError, OSError)) and e.errno == errno.EBADF:
+                logger.debug(f"Bad file descriptor in safe_send")
+            else:
+                logger.error(f"Error in safe_send: {e}")
             return 0
             
     def safe_close(*args, **kwargs):
         try:
             if not _close or getattr(sock, 'closed', False):
                 return
-            _close()
+            _close(*args, **kwargs)
         except Exception as e:
-            logger.error(f"Error in safe_close: {e}")
+            if isinstance(e, (IOError, OSError)) and e.errno == errno.EBADF:
+                logger.debug(f"Bad file descriptor in safe_close")
+            else:
+                logger.error(f"Error in safe_close: {e}")
             
-    # Only replace methods if they exist
+    def safe_fileno(*args, **kwargs):
+        try:
+            if not _fileno or getattr(sock, 'closed', False):
+                raise IOError(errno.EBADF, "Bad file descriptor")
+            return _fileno(*args, **kwargs)
+        except Exception as e:
+            if isinstance(e, (IOError, OSError)) and e.errno == errno.EBADF:
+                logger.debug(f"Bad file descriptor in safe_fileno")
+            else:
+                logger.error(f"Error in safe_fileno: {e}")
+            raise
+            
+    # Replace methods
     if _send:
         sock.send = safe_send
     if _close:
         sock.close = safe_close
+    if _fileno:
+        sock.fileno = safe_fileno
         
     return sock
 
@@ -108,12 +129,28 @@ def cleanup_socket(sid, socket):
         
         if socket:
             try:
+                # Close WebSocket first if it exists
                 if hasattr(socket, 'ws') and socket.ws:
-                    socket.ws.close()
+                    try:
+                        socket.ws.close()
+                    except Exception as e:
+                        if isinstance(e, (IOError, OSError)) and e.errno == errno.EBADF:
+                            logger.debug(f"Bad file descriptor while closing WebSocket")
+                        else:
+                            logger.error(f"Error closing WebSocket: {e}")
+                
+                # Then close the socket itself
                 if not getattr(socket, 'closed', False):
-                    socket.close()
+                    try:
+                        socket.close()
+                    except Exception as e:
+                        if isinstance(e, (IOError, OSError)) and e.errno == errno.EBADF:
+                            logger.debug(f"Bad file descriptor while closing socket")
+                        else:
+                            logger.error(f"Error closing socket: {e}")
+                            
             except Exception as e:
-                logger.error(f"Error closing socket: {e}")
+                logger.error(f"Error in socket cleanup: {e}")
                 
     except Exception as e:
         logger.error(f"Error cleaning up socket {sid}: {e}")
@@ -213,7 +250,7 @@ socketio.init_app(
     ping_interval_grace_period=5000,
     allow_upgrades=True,
     json=True,
-    http_compression=True,
+    http_compression=False,  # Disable compression for stability
     compression_threshold=1024,
     max_decode_packets=50,
     max_encode_packets=50,
