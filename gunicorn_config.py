@@ -13,9 +13,8 @@ worker_class = "eventlet"
 worker_connections = 1000
 
 # Timeouts
-timeout = 120
-keepalive = 5
-graceful_timeout = 30
+timeout = 300
+keepalive = 2
 
 # Logging
 accesslog = "-"
@@ -49,6 +48,15 @@ def post_fork(server, worker):
 def on_exit(server):
     """Clean up on exit."""
     server.log.info("Shutting down")
+
+def worker_exit(server, worker):
+    """Clean up after worker exit."""
+    try:
+        eventlet.hub.get_hub().debug_blocking = False
+        eventlet.hub.get_hub().abort()
+        eventlet.hub.get_hub().debug_exceptions = False
+    except:
+        pass
 
 # WebSocket settings
 websocket_max_message_size = 16 * 1024 * 1024  # 16MB

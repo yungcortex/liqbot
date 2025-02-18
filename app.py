@@ -41,8 +41,10 @@ socketio = SocketIO(
     manage_session=False,
     cookie=False,
     always_connect=True,
-    transports=['websocket', 'polling'],
-    max_http_buffer_size=1e6
+    transports=['websocket'],
+    max_http_buffer_size=1e6,
+    async_handlers=False,
+    monitor_clients=False
 )
 
 # Configure CORS with proper settings
@@ -51,7 +53,7 @@ CORS(app, resources={
         "origins": ["https://liqbot-038f.onrender.com"],
         "methods": ["GET", "POST", "OPTIONS"],
         "allow_headers": ["Content-Type"],
-        "supports_credentials": True,
+        "supports_credentials": False,
         "max_age": 3600
     }
 })
@@ -88,6 +90,12 @@ def handle_disconnect():
     try:
         sid = request.sid
         logger.info(f"Client disconnected - SID: {sid}")
+        # Clean up any remaining session data
+        if hasattr(request, 'sid'):
+            try:
+                socketio.server.disconnect(request.sid, namespace='/')
+            except Exception as e:
+                logger.error(f"Error cleaning up session {request.sid}: {e}")
     except Exception as e:
         logger.error(f"Error in handle_disconnect: {e}")
 
@@ -98,12 +106,12 @@ def default_error_handler(e):
         sid = request.sid if hasattr(request, 'sid') else 'Unknown'
         logger.error(f"Socket.IO error for SID {sid}: {str(e)}")
         
-        # Try to clean up session on error
+        # Clean up session on error
         if hasattr(request, 'sid'):
             try:
-                socketio.server.remove_session(request.sid)
+                socketio.server.disconnect(request.sid, namespace='/')
             except Exception as session_error:
-                logger.error(f"Error removing session for SID {request.sid}: {session_error}")
+                logger.error(f"Error cleaning up session {request.sid}: {session_error}")
                 
     except Exception as error:
         logger.error(f"Error in error handler: {error}")
@@ -115,7 +123,7 @@ def emit_update(data, event_type='stats_update'):
             for symbol, values in data.items():
                 if symbol in latest_stats:
                     latest_stats[symbol].update(values)
-        socketio.emit(event_type, data)  # Emit without namespace
+        socketio.emit(event_type, data, namespace='/')
     except Exception as e:
         logger.error(f"Error emitting {event_type}: {e}")
 

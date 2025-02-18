@@ -218,19 +218,16 @@
     </div>
 
     <script>
-        // Configure Socket.IO to connect to the correct endpoint
-        const socket = io({
-            path: '/socket.io/',
-            transports: ['websocket', 'polling'],
+        // Socket.IO connection
+        const socket = io('https://liqbot-038f.onrender.com', {
+            transports: ['websocket'],
             reconnection: true,
-            reconnectionAttempts: Infinity,
             reconnectionDelay: 1000,
             reconnectionDelayMax: 5000,
+            reconnectionAttempts: 3,
             timeout: 60000,
             autoConnect: true,
-            forceNew: false,
-            upgrade: true,
-            rememberUpgrade: true,
+            forceNew: true,
             secure: true,
             rejectUnauthorized: false,
             withCredentials: false
@@ -265,6 +262,8 @@
         
         socket.on('connect', () => {
             console.log('Connected to server');
+            document.getElementById('connection-status').textContent = 'Connected';
+            document.getElementById('connection-status').style.color = 'green';
             feed.innerHTML = '<div class="terminal-line">Connected to liquidation feed</div>';
             socket.emit('get_stats');
             startHeartbeat();
@@ -272,14 +271,19 @@
 
         socket.on('connect_error', (error) => {
             console.error('Connection error:', error);
+            document.getElementById('connection-status').textContent = 'Connection Error';
+            document.getElementById('connection-status').style.color = 'red';
             feed.innerHTML += '<div class="terminal-line">Connection error. Retrying...</div>';
         });
 
         socket.on('disconnect', (reason) => {
-            console.log('Disconnected from server:', reason);
-            feed.innerHTML += '<div class="terminal-line">Disconnected from server. Attempting to reconnect...</div>';
-            if (reason === 'io server disconnect') {
-                setTimeout(() => socket.connect(), 1000);
+            console.log('Disconnected:', reason);
+            document.getElementById('connection-status').textContent = 'Disconnected';
+            document.getElementById('connection-status').style.color = 'red';
+            
+            // Only attempt to reconnect if not already reconnecting
+            if (!socket.reconnecting && reason !== 'io server disconnect') {
+                socket.connect();
             }
         });
 
