@@ -251,7 +251,6 @@ socketio.init_app(
     cors_headers=['Content-Type'],
     close_timeout=10,
     max_queue_size=10,
-    async_mode_client='eventlet',
     reconnection=True,
     reconnection_attempts=float('inf'),
     reconnection_delay=1000,
@@ -266,19 +265,9 @@ socketio.init_app(
     allow_upgrades=False,  # Disable upgrades to prevent race conditions
     initial_packet_timeout=5,  # Reduce initial packet timeout
     json=json,  # Use standard json
-    async_mode_client='eventlet',
-    always_connect=True,
     connect_timeout=5,
     upgrades=[],  # Disable all upgrades
-    allow_reconnection=True,
-    max_http_buffer_size=1024 * 1024,
-    ping_timeout=20,
-    ping_interval=10,
-    max_queue_size=10,
-    logger=True,
-    engineio_logger=True,
-    monitor_clients=True,
-    cors_allowed_origins=["https://liqbot-038f.onrender.com"]
+    allow_reconnection=True
 )
 
 # Socket connection handler

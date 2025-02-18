@@ -36,7 +36,7 @@ app.config['PROPAGATE_EXCEPTIONS'] = True
 # Initialize SocketIO with optimized settings
 socketio = SocketIO(
     app,
-    cors_allowed_origins="*",
+    cors_allowed_origins=["https://liqbot-038f.onrender.com"],
     async_mode='eventlet',
     logger=True,
     engineio_logger=True,
@@ -60,19 +60,9 @@ socketio = SocketIO(
     allow_upgrades=False,  # Disable upgrades to prevent race conditions
     initial_packet_timeout=5,  # Reduce initial packet timeout
     json=json,  # Use standard json
-    async_mode_client='eventlet',
-    always_connect=True,
     connect_timeout=5,
     upgrades=[],  # Disable all upgrades
-    allow_reconnection=True,
-    max_http_buffer_size=1024 * 1024,
-    ping_timeout=20,
-    ping_interval=10,
-    max_queue_size=10,
-    logger=True,
-    engineio_logger=True,
-    monitor_clients=True,
-    cors_allowed_origins=["https://liqbot-038f.onrender.com"]
+    allow_reconnection=True
 )
 
 # Configure CORS
