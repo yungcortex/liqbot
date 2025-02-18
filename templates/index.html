@@ -221,20 +221,25 @@
         // Configure Socket.IO to connect to the correct endpoint
         const socket = io({
             path: '/socket.io/',
-            transports: ['polling', 'websocket'],  // Start with polling, then upgrade to websocket
+            transports: ['polling', 'websocket'],
             reconnection: true,
             reconnectionAttempts: Infinity,
             reconnectionDelay: 1000,
             reconnectionDelayMax: 5000,
-            timeout: 120000,  // Match server timeout
+            timeout: 120000,
             autoConnect: true,
-            forceNew: false,  // Don't force new connection
+            forceNew: false,
+            upgrade: true,
+            rememberUpgrade: true,
             secure: window.location.protocol === 'https:',
             rejectUnauthorized: false,
-            withCredentials: false
+            withCredentials: false,
+            extraHeaders: {
+                "Access-Control-Allow-Origin": "*"
+            }
         });
 
-        // Create a heartbeat mechanism with more frequent checks
+        // Create a heartbeat mechanism
         let heartbeatInterval;
         let missedHeartbeats = 0;
         const MAX_MISSED_HEARTBEATS = 3;
@@ -253,68 +258,78 @@
                     if (missedHeartbeats >= MAX_MISSED_HEARTBEATS) {
                         console.log('Too many missed heartbeats, reconnecting...');
                         socket.disconnect();
-                        socket.connect();
+                        setTimeout(() => socket.connect(), 1000);
                     }
                 }
-            }, 15000); // Send heartbeat every 15 seconds
+            }, 15000);
         }
 
         const feed = document.getElementById('liquidation-feed');
-        let reconnectAttempts = 0;
         
-        // Add connection status logging
         socket.on('connect', () => {
             console.log('Connected to server');
-            document.getElementById('liquidation-feed').innerHTML = '<div class="terminal-line">Connected to liquidation feed via websocket</div>';
-            socket.emit('get_stats');  // Request initial stats
+            feed.innerHTML = '<div class="terminal-line">Connected to liquidation feed</div>';
+            socket.emit('get_stats');
+            startHeartbeat();
         });
 
         socket.on('connect_error', (error) => {
             console.error('Connection error:', error);
-            // If WebSocket fails, try polling
-            if (socket.io.opts.transports[0] === 'websocket') {
-                console.log('Falling back to polling transport');
-                socket.io.opts.transports = ['polling', 'websocket'];
-                socket.connect();
-            }
+            feed.innerHTML += '<div class="terminal-line">Connection error. Retrying...</div>';
         });
 
-        socket.on('disconnect', () => {
-            console.log('Disconnected from server');
-            document.getElementById('liquidation-feed').innerHTML += '<div class="terminal-line">Disconnected from server. Attempting to reconnect...</div>';
+        socket.on('disconnect', (reason) => {
+            console.log('Disconnected from server:', reason);
+            feed.innerHTML += '<div class="terminal-line">Disconnected from server. Attempting to reconnect...</div>';
+            if (reason === 'io server disconnect') {
+                setTimeout(() => socket.connect(), 1000);
+            }
         });
 
         socket.on('error', (error) => {
             console.error('Socket error:', error);
-            const indicator = document.createElement('div');
-            indicator.className = 'terminal-line';
-            indicator.style.color = '#ff0000';
-            indicator.innerHTML = `❌ Socket error: ${error.message}`;
-            feed.insertBefore(indicator, feed.firstChild);
+            feed.innerHTML += `<div class="terminal-line">Socket error: ${error}</div>`;
         });
 
-        // Add reconnect event handlers with better visual feedback
         socket.io.on('reconnect_attempt', (attempt) => {
             console.log('Attempting to reconnect:', attempt);
-            const indicator = document.createElement('div');
-            indicator.className = 'terminal-line';
-            indicator.style.color = '#ffff00';
-            indicator.innerHTML = `🔄 Reconnection attempt ${attempt}...`;
-            feed.insertBefore(indicator, feed.firstChild);
+            feed.innerHTML += `<div class="terminal-line">Reconnection attempt ${attempt}...</div>`;
         });
 
         socket.io.on('reconnect', (attempt) => {
             console.log('Reconnected on attempt:', attempt);
-            const indicator = document.createElement('div');
-            indicator.className = 'terminal-line';
-            indicator.style.color = '#00ff00';
-            indicator.innerHTML = `✅ Reconnected after ${attempt} attempts`;
-            feed.insertBefore(indicator, feed.firstChild);
-            
-            // Request latest stats after reconnection
+            feed.innerHTML += `<div class="terminal-line">Reconnected after ${attempt} attempts</div>`;
             socket.emit('get_stats');
         });
-        
+
+        socket.on('stats_update', (data) => {
+            console.log('Stats update:', data);
+            for (const [symbol, stats] of Object.entries(data)) {
+                const lower = symbol.toLowerCase();
+                updateElementWithGlitch(`${lower}-longs`, stats.longs);
+                updateElementWithGlitch(`${lower}-shorts`, stats.shorts);
+                updateElementWithGlitch(`${lower}-total`, formatNumber(stats.total_value));
+            }
+        });
+
+        socket.on('liquidation', (data) => {
+            console.log('Liquidation event:', data);
+            const feed = document.getElementById('liquidation-feed');
+            const direction = data.side === 'LONG' ? 'long' : 'short';
+            const line = `
+                <div class="terminal-line glitch-animation">
+                    <span class="${direction}">${data.symbol} ${data.side}</span>
+                    ${data.amount.toFixed(3)} @ $${data.price.toFixed(2)}
+                    = $${data.value.toFixed(2)}
+                </div>
+            `;
+            feed.innerHTML = line + feed.innerHTML;
+        });
+
+        socket.on('heartbeat_response', () => {
+            missedHeartbeats = 0;
+        });
+
         function formatNumber(num) {
             return new Intl.NumberFormat('en-US', {
                 style: 'currency',
@@ -339,36 +354,6 @@
                 element.classList.remove('glitch-animation');
             }, 200);
         }
-
-        socket.on('stats_update', (data) => {
-            console.log('Stats update:', data);
-            for (const [symbol, stats] of Object.entries(data)) {
-                const lower = symbol.toLowerCase();
-                document.getElementById(`${lower}-longs`).textContent = stats.longs;
-                document.getElementById(`${lower}-shorts`).textContent = stats.shorts;
-                document.getElementById(`${lower}-total`).textContent = `$${stats.total_value.toFixed(2)}`;
-            }
-        });
-
-        socket.on('liquidation', (data) => {
-            console.log('Liquidation event:', data);
-            const feed = document.getElementById('liquidation-feed');
-            const direction = data.side === 'LONG' ? 'long' : 'short';
-            const line = `
-                <div class="terminal-line glitch-animation">
-                    <span class="${direction}">${data.symbol} ${data.side}</span>
-                    ${data.amount.toFixed(3)} @ $${data.price.toFixed(2)}
-                    = $${data.value.toFixed(2)}
-                </div>
-            `;
-            feed.innerHTML = line + feed.innerHTML;
-        });
-
-        socket.on('heartbeat_response', () => {
-            missedHeartbeats = 0;
-        });
-
-        startHeartbeat();
     </script>
 </body>
 </html> 

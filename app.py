@@ -50,7 +50,7 @@ socketio = SocketIO(
     allow_upgrades=True,
     cookie=None,
     always_connect=True,
-    transports=['websocket', 'polling'],
+    transports=['polling', 'websocket'],
     cors_credentials=False,
     max_queue_size=10
 )
@@ -81,28 +81,31 @@ def after_request(response):
 
 @socketio.on('connect')
 def handle_connect():
+    """Handle client connection"""
     try:
         with app.app_context():
             logger.info(f"Client connected via {request.environ.get('wsgi.url_scheme', 'unknown')}")
+            # Send initial stats
             emit('stats_update', latest_stats)
     except Exception as e:
-        logger.error(f"Error in handle_connect: {e}")
+        logger.error(f"Error in handle_connect: {e}", exc_info=True)
 
 @socketio.on('disconnect')
 def handle_disconnect():
+    """Handle client disconnection"""
     try:
         logger.info("Client disconnected")
     except Exception as e:
-        logger.error(f"Error in handle_disconnect: {e}")
+        logger.error(f"Error in handle_disconnect: {e}", exc_info=True)
 
 @socketio.on('heartbeat')
 def handle_heartbeat():
-    """Handle heartbeat messages from clients to keep the connection alive"""
+    """Handle heartbeat messages from clients"""
     try:
         with app.app_context():
             emit('heartbeat_response', {'status': 'ok'})
     except Exception as e:
-        logger.error(f"Error in handle_heartbeat: {e}")
+        logger.error(f"Error in handle_heartbeat: {e}", exc_info=True)
 
 @socketio.on('get_stats')
 def handle_get_stats():
@@ -110,9 +113,9 @@ def handle_get_stats():
     try:
         with app.app_context():
             emit('stats_update', latest_stats)
-            logger.debug("Sent stats update in response to get_stats request")
+            logger.debug(f"Sent stats update: {latest_stats}")
     except Exception as e:
-        logger.error(f"Error in handle_get_stats: {e}")
+        logger.error(f"Error in handle_get_stats: {e}", exc_info=True)
 
 def emit_update(data, event_type='stats_update'):
     """Emit updates to all connected clients"""
@@ -123,9 +126,9 @@ def emit_update(data, event_type='stats_update'):
                 for symbol, values in data.items():
                     if symbol in latest_stats:
                         latest_stats[symbol].update(values)
-            socketio.emit(event_type, data)
+            socketio.emit(event_type, data, namespace='/')
     except Exception as e:
-        logger.error(f"Error emitting {event_type}: {e}")
+        logger.error(f"Error emitting {event_type}: {e}", exc_info=True)
 
 def process_liquidation_event(data):
     """Process a liquidation event and emit it to clients"""
