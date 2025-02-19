@@ -1,5 +1,5 @@
 import eventlet
-eventlet.monkey_patch(os=False)  # Don't patch os to avoid file descriptor issues
+eventlet.monkey_patch()  # Full monkey patch for better compatibility
 
 from app import app, socketio, background_tasks
 import threading
@@ -15,9 +15,6 @@ from flask_cors import CORS
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Initialize eventlet hub
-eventlet.hubs.use_hub('poll')  # Use poll instead of epoll
-
 # Global state
 active_connections = {}
 connection_lock = threading.Lock()
@@ -27,12 +24,7 @@ def cleanup_socket(sid):
     try:
         with connection_lock:
             if sid in active_connections:
-                conn = active_connections.pop(sid, None)
-                if conn and hasattr(socketio.server, 'disconnect'):
-                    try:
-                        socketio.server.disconnect(sid, namespace='/')
-                    except Exception:
-                        pass
+                active_connections.pop(sid, None)
                 logger.info(f"Cleaned up socket {sid}")
     except Exception as e:
         logger.error(f"Error cleaning up socket {sid}: {e}")
@@ -55,29 +47,27 @@ bot_thread = threading.Thread(target=background_tasks)
 bot_thread.daemon = True
 bot_thread.start()
 
-# Initialize Socket.IO with improved settings
+# Initialize Socket.IO with simplified settings
 socketio.init_app(
     app,
     async_mode='eventlet',
     cors_allowed_origins=["https://liqbot-038f.onrender.com"],
-    ping_timeout=30000,  # 30 seconds
-    ping_interval=15000,  # 15 seconds
+    ping_timeout=20000,
+    ping_interval=10000,
     manage_session=True,
     message_queue=None,
     always_connect=True,
-    transports=['polling', 'websocket'],  # Start with polling
+    transports=['polling'],  # Only use polling for now
     cookie=None,
     logger=True,
     engineio_logger=True,
     async_handlers=True,
     monitor_clients=True,
-    upgrade_timeout=20000,
+    upgrade_timeout=10000,
     max_http_buffer_size=1024 * 1024,
-    websocket_ping_interval=15000,
-    websocket_ping_timeout=30000,
     cors_credentials=False,
     cors_headers=['Content-Type', 'X-Requested-With'],
-    close_timeout=30000,
+    close_timeout=20000,
     max_queue_size=100,
     reconnection=True,
     reconnection_attempts=5,
@@ -87,15 +77,14 @@ socketio.init_app(
     retry_delay=1000,
     retry_delay_max=5000,
     ping_interval_grace_period=2000,
-    allow_upgrades=True,
+    allow_upgrades=False,  # Disable upgrades for now
     json=True,
-    http_compression=False,  # Disable compression
+    http_compression=False,
     compression_threshold=1024,
     max_decode_packets=50,
     max_encode_packets=50,
     handle_sigint=False,
-    namespace='/',
-    async_handlers_kwargs={'async_mode': 'eventlet'}
+    namespace='/'
 )
 
 # Configure CORS for Flask app

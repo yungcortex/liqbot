@@ -1,5 +1,5 @@
 import eventlet
-eventlet.monkey_patch(os=False)
+eventlet.monkey_patch()
 
 import os
 import logging
@@ -9,18 +9,18 @@ logger = logging.getLogger('gunicorn.error')
 
 # Server socket settings
 bind = f"0.0.0.0:{os.environ.get('PORT', '10000')}"
-backlog = 1024
+backlog = 512
 
 # Worker processes - keep single worker for WebSocket
 workers = 1
 worker_class = "eventlet"
-worker_connections = 1000
+worker_connections = 500
 threads = 1
 
 # Timeouts - increased for WebSocket stability
-timeout = 90
-graceful_timeout = 30
-keepalive = 30
+timeout = 60
+graceful_timeout = 20
+keepalive = 20
 
 # Logging
 accesslog = "-"
@@ -49,14 +49,13 @@ group = None
 tmp_upload_dir = None
 
 # Worker settings
-max_requests = 1000
+max_requests = 500
 max_requests_jitter = 50
 worker_tmp_dir = None
 
 def on_starting(server):
     """Initialize server."""
     logger.info("Server starting up")
-    eventlet.hubs.use_hub('poll')
 
 def when_ready(server):
     """Called just after the server is started."""
@@ -65,7 +64,6 @@ def when_ready(server):
 def post_fork(server, worker):
     """Set up worker after fork."""
     server.log.info("Worker spawned (pid: %s)", worker.pid)
-    eventlet.hubs.use_hub('poll')
 
 def worker_int(worker):
     """Handle worker interruption signals."""
@@ -98,23 +96,19 @@ buffer_size = 65535
 
 # Worker class args
 worker_class_args = {
-    'worker_connections': 1000,
-    'websocket_max_message_size': 1024 * 1024,
-    'websocket_ping_interval': 15,
-    'websocket_ping_timeout': 30,
-    'websocket_per_message_deflate': False,
-    'keepalive': 30,
-    'client_timeout': 90,
+    'worker_connections': 500,
+    'keepalive': 20,
+    'client_timeout': 60,
     'proxy_protocol': False,
     'proxy_allow_ips': '*',
-    'graceful_timeout': 30,
-    'timeout': 90,
-    'backlog': 1024
+    'graceful_timeout': 20,
+    'timeout': 60,
+    'backlog': 512
 }
 
 # Eventlet settings
-worker_connections = 1000
-worker_rlimit_nofile = 2048
+worker_connections = 500
+worker_rlimit_nofile = 1024
 
 def on_exit(server):
     """Handle server shutdown."""

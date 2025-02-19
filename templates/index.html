@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -224,31 +225,19 @@
     </div>
 
     <script>
-        // Socket.IO connection with improved settings
+        // Socket.IO connection with simplified settings
         const socket = io(window.location.origin, {
-            transports: ['websocket', 'polling'],
+            transports: ['polling'],  // Only use polling for now
             reconnection: true,
-            reconnectionAttempts: Infinity,
+            reconnectionAttempts: 5,
             reconnectionDelay: 1000,
             reconnectionDelayMax: 5000,
-            timeout: 60000,
+            timeout: 20000,
             autoConnect: true,
-            forceNew: false,
-            secure: true,
-            rejectUnauthorized: false,
-            withCredentials: false,
+            forceNew: true,
             path: '/socket.io/',
-            query: {},
-            extraHeaders: {
-                'X-Requested-With': 'XMLHttpRequest'
-            },
-            upgrade: true,
-            rememberUpgrade: true,
-            timestampRequests: false,
-            timestampParam: 't',
-            closeOnBeforeunload: false,
-            pingInterval: 25000,
-            pingTimeout: 60000
+            withCredentials: false,
+            closeOnBeforeunload: true
         });
 
         // Connection state tracking
@@ -256,7 +245,7 @@
         let reconnectTimer = null;
         const RECONNECT_DELAY = 1000;
         const MAX_RECONNECT_DELAY = 5000;
-        const MAX_RECONNECT_ATTEMPTS = 10;
+        const MAX_RECONNECT_ATTEMPTS = 5;
         let reconnectAttempts = 0;
 
         // Debug logging for connection events
@@ -315,6 +304,7 @@
             
             if (!isConnecting && !reconnectTimer) {
                 isConnecting = true;
+                socket.close();  // Ensure socket is properly closed
                 const delay = Math.min(RECONNECT_DELAY * Math.pow(2, reconnectAttempts), MAX_RECONNECT_DELAY);
                 console.log(`[Socket] Scheduling reconnect in ${delay}ms`);
                 reconnectTimer = setTimeout(() => {
