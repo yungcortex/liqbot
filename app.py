@@ -340,10 +340,10 @@ def process_liquidation_event(data):
             'price': price,
             'value': value,
             'exchange': data.get('exchange', 'Unknown')
-        }, broadcast=True)
+        }, to='*')
 
         # Emit stats update
-        socketio.emit('stats_update', frontend_data, broadcast=True)
+        socketio.emit('stats_update', frontend_data, to='*')
         
         logger.info(f"Emitted liquidation event and stats update: {data}")
 
