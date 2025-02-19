@@ -78,10 +78,28 @@
             overflow-y: auto;
         }
 
+        .liquidation-feed {
+            height: 400px;
+            overflow-y: auto;
+            padding: 10px;
+            font-family: 'Share Tech Mono', monospace;
+            background-color: rgba(0, 0, 0, 0.8);
+            border: 1px solid #0f0;
+            border-radius: 5px;
+        }
+
         .liquidation-entry {
-            margin-bottom: 10px;
-            padding: 5px;
-            border-bottom: 1px solid rgba(0, 255, 0, 0.3);
+            padding: 8px;
+            margin-bottom: 8px;
+            border-bottom: 1px solid rgba(0, 255, 0, 0.2);
+            font-size: 14px;
+            line-height: 1.4;
+            opacity: 0.9;
+        }
+
+        .liquidation-entry:hover {
+            background-color: rgba(0, 255, 0, 0.1);
+            opacity: 1;
         }
 
         #status {
@@ -113,6 +131,52 @@
             60% { transform: translate(2px, 2px); }
             80% { transform: translate(2px, -2px); }
             100% { transform: translate(0); }
+        }
+
+        .connection-status {
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+
+        .connection-status.connected {
+            background-color: #0f0;
+            color: #000;
+        }
+
+        .connection-status.disconnected,
+        .connection-status.error,
+        .connection-status.failed {
+            background-color: #f00;
+            color: #fff;
+        }
+
+        .connection-status.reconnecting {
+            background-color: #ff0;
+            color: #000;
+        }
+
+        .crypto-card {
+            background-color: rgba(0, 255, 0, 0.05);
+            border: 1px solid #0f0;
+            transition: all 0.3s ease;
+        }
+
+        .crypto-card:hover {
+            background-color: rgba(0, 255, 0, 0.1);
+            box-shadow: 0 0 10px rgba(0, 255, 0, 0.2);
+        }
+
+        .value {
+            font-size: 1.2em;
+            font-weight: bold;
+            color: #fff;
+        }
+
+        .crypto-icon {
+            font-size: 1.5em;
+            margin-right: 8px;
+            opacity: 0.8;
         }
     </style>
 </head>
@@ -280,6 +344,78 @@
             }
         });
 
+        // Stats elements
+        const stats = {
+            bitcoin: {
+                longLiqs: document.getElementById('btc-longs'),
+                shortLiqs: document.getElementById('btc-shorts'),
+                totalValue: document.getElementById('btc-total')
+            },
+            ethereum: {
+                longLiqs: document.getElementById('eth-longs'),
+                shortLiqs: document.getElementById('eth-shorts'),
+                totalValue: document.getElementById('eth-total')
+            },
+            solana: {
+                longLiqs: document.getElementById('sol-longs'),
+                shortLiqs: document.getElementById('sol-shorts'),
+                totalValue: document.getElementById('sol-total')
+            }
+        };
+
+        // Liquidation feed element
+        const liquidationFeed = document.getElementById('liquidation-feed');
+
+        // Socket event handlers
+        socket.on('initial_data', (data) => {
+            console.log('Received initial data:', data);
+            updateStats(data);
+        });
+
+        socket.on('stats_update', (data) => {
+            console.log('Received stats update:', data);
+            updateStats(data);
+        });
+
+        socket.on('liquidation', (data) => {
+            console.log('Received liquidation:', data);
+            addLiquidation(data);
+        });
+
+        // Update UI functions
+        function updateStats(data) {
+            for (const [coin, values] of Object.entries(data)) {
+                if (stats[coin]) {
+                    stats[coin].longLiqs.textContent = values.long_liqs;
+                    stats[coin].shortLiqs.textContent = values.short_liqs;
+                    stats[coin].totalValue.textContent = `$${values.total_value.toLocaleString()}`;
+                }
+            }
+        }
+
+        function addLiquidation(data) {
+            const entry = document.createElement('div');
+            entry.className = 'liquidation-entry glitch-animation';
+            
+            const side = data.side === 'LONG' ? '🔴 LONG LIQ' : '🟢 SHORT LIQ';
+            const exchange = data.exchange ? `[${data.exchange}]` : '';
+            const amount = parseFloat(data.amount).toFixed(3);
+            const price = parseFloat(data.price).toFixed(2);
+            const value = parseFloat(data.value).toFixed(2);
+            
+            entry.innerHTML = `${new Date().toLocaleTimeString()} ${exchange} ${data.symbol} ${side} ${amount} @ $${price} = $${value}`;
+            
+            liquidationFeed.insertBefore(entry, liquidationFeed.firstChild);
+            
+            // Keep only last 100 entries
+            const entries = liquidationFeed.getElementsByClassName('liquidation-entry');
+            if (entries.length > 100) {
+                for (let i = 100; i < entries.length; i++) {
+                    entries[i].remove();
+                }
+            }
+        }
+
         // Reconnection handler with exponential backoff
         function handleReconnect() {
             if (reconnectTimeout) {
@@ -317,71 +453,6 @@
                 socket.disconnect();
             }
         });
-
-        // Stats elements
-        const stats = {
-            bitcoin: {
-                longLiqs: document.querySelector('#btc-longs'),
-                shortLiqs: document.querySelector('#btc-shorts'),
-                totalValue: document.querySelector('#btc-total')
-            },
-            ethereum: {
-                longLiqs: document.querySelector('#eth-longs'),
-                shortLiqs: document.querySelector('#eth-shorts'),
-                totalValue: document.querySelector('#eth-total')
-            },
-            solana: {
-                longLiqs: document.querySelector('#sol-longs'),
-                shortLiqs: document.querySelector('#sol-shorts'),
-                totalValue: document.querySelector('#sol-total')
-            }
-        };
-
-        // Socket event handlers
-        socket.on('initial_data', (data) => {
-            console.log('Received initial data:', data);
-            updateStats(data);
-        });
-
-        socket.on('stats_update', (data) => {
-            console.log('Received stats update:', data);
-            updateStats(data);
-        });
-
-        socket.on('liquidation', (data) => {
-            console.log('Received liquidation:', data);
-            addLiquidation(data);
-        });
-
-        // Update UI function
-        function updateStats(data) {
-            for (const [coin, values] of Object.entries(data)) {
-                if (stats[coin]) {
-                    stats[coin].longLiqs.textContent = values.long_liqs;
-                    stats[coin].shortLiqs.textContent = values.short_liqs;
-                    stats[coin].totalValue.textContent = `$${values.total_value.toLocaleString()}`;
-                }
-            }
-        }
-
-        // Add liquidation to recent list
-        function addLiquidation(data) {
-            const entry = document.createElement('div');
-            entry.className = 'terminal-line glitch-animation';
-            const side = data.side === 'LONG' ? '🔴 LONG LIQ' : '🟢 SHORT LIQ';
-            const exchange = data.exchange ? `[${data.exchange}]` : '';
-            entry.innerHTML = `${new Date().toLocaleTimeString()} ${exchange} ${data.symbol} ${side} ${data.amount.toFixed(3)} @ $${data.price.toFixed(2)} = $${data.value.toFixed(2)}`;
-            recentLiquidations.insertBefore(entry, recentLiquidations.firstChild);
-            
-            // Keep only last 100 entries
-            const maxLines = 100;
-            const lines = recentLiquidations.getElementsByClassName('terminal-line');
-            if (lines.length > maxLines) {
-                for (let i = maxLines; i < lines.length; i++) {
-                    lines[i].remove();
-                }
-            }
-        }
     </script>
 </body>
 </html> 
