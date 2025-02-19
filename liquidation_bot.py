@@ -8,6 +8,7 @@ import hmac
 import time
 import base64
 import hashlib
+import ssl
 
 # Configure logging
 logging.basicConfig(
@@ -114,27 +115,37 @@ async def process_binance_liquidation(data):
             logger.debug(f"Ignoring Binance message type: {data['e']}")
             return
             
+        # Extract order data
+        if 'o' not in data:
+            logger.error(f"Missing order data in Binance message: {data}")
+            return
+            
+        order = data['o']
+        if not isinstance(order, dict):
+            logger.error(f"Invalid order data format in Binance message: {order}")
+            return
+            
         # Extract required fields with validation
         required_fields = {'s': 'symbol', 'S': 'side', 'q': 'quantity', 'p': 'price'}
         for key, name in required_fields.items():
-            if key not in data:
-                logger.error(f"Missing {name} in Binance liquidation data: {data}")
+            if key not in order:
+                logger.error(f"Missing {name} in Binance order data: {order}")
                 return
                 
-        symbol = normalize_symbol(data['s'], 'binance')
+        symbol = normalize_symbol(order['s'], 'binance')
         if symbol not in stats:
             logger.debug(f"Ignoring unsupported Binance symbol: {symbol}")
             return
 
         try:
-            amount = float(data['q'])
-            price = float(data['p'])
+            amount = float(order['q'])
+            price = float(order['p'])
             value = amount * price
         except (ValueError, TypeError) as e:
             logger.error(f"Error converting Binance numeric values: {e}")
             return
             
-        side = normalize_side(data['S'], 'binance')
+        side = normalize_side(order['S'], 'binance')
 
         await update_and_emit_stats(symbol, side, amount, price, value, 'Binance')
         
@@ -285,7 +296,18 @@ async def subscribe_okx():
 async def subscribe_gate():
     """Subscribe to Gate.io WebSocket"""
     try:
-        async with websockets.connect(WEBSOCKET_URLS['gate']) as websocket:
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+        
+        async with websockets.connect(
+            WEBSOCKET_URLS['gate'],
+            ssl=ssl_context,
+            ping_interval=20,
+            ping_timeout=60,
+            close_timeout=60,
+            max_size=10 * 1024 * 1024  # 10MB
+        ) as websocket:
             # Initial subscription
             subscribe_message = {
                 "time": int(time.time()),
@@ -308,7 +330,7 @@ async def subscribe_gate():
                     continue
 
     except Exception as e:
-        logger.error(f"Gate.io WebSocket error: {e}")
+        logger.error(f"Gate.io WebSocket error: {e}. Reconnecting...")
         await asyncio.sleep(5)  # Wait before reconnecting
 
 async def connect_all_websockets():
