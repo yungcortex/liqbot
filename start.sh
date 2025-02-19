@@ -1,10 +1,15 @@
 #!/bin/bash
 
+# Set environment variables
+export PYTHONUNBUFFERED=1
+export EVENTLET_NO_GREENDNS=yes
+export EVENTLET_NONBLOCKING=1
+
 # Trap SIGTERM and SIGINT
 trap 'kill -TERM $PID' TERM INT
 
-# Start Gunicorn with proper settings for Socket.IO
-gunicorn --worker-class eventlet -w 1 'wsgi:application' &
+# Start Gunicorn with config file
+gunicorn -c gunicorn_config.py 'wsgi:application' &
 
 # Store PID
 PID=$!

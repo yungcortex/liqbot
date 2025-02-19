@@ -11,16 +11,16 @@ logger = logging.getLogger('gunicorn.error')
 bind = f"0.0.0.0:{os.environ.get('PORT', '10000')}"
 backlog = 2048
 
-# Worker processes
+# Worker processes - keep single worker for WebSocket
 workers = 1
 worker_class = "eventlet"
-worker_connections = 1000
+worker_connections = 2000
 threads = 1
 
-# Timeouts
-timeout = 300
-graceful_timeout = 60
-keepalive = 5
+# Timeouts - increased for WebSocket stability
+timeout = 120
+graceful_timeout = 30
+keepalive = 65
 
 # Logging
 accesslog = "-"
@@ -53,7 +53,6 @@ max_requests = 0
 max_requests_jitter = 0
 worker_tmp_dir = None
 
-# Worker lifecycle
 def on_starting(server):
     """Initialize server."""
     logger.info("Server starting up")
@@ -63,28 +62,14 @@ def when_ready(server):
     """Called just after the server is started."""
     logger.info("Server is ready. Listening on: %s", bind)
 
-def pre_fork(server, worker):
-    """Pre-fork initialization."""
-    logger.info("Pre-forking worker")
-    eventlet.hubs.use_hub()
-
 def post_fork(server, worker):
     """Set up worker after fork."""
     server.log.info("Worker spawned (pid: %s)", worker.pid)
-    # Initialize eventlet hub
     eventlet.hubs.use_hub()
-
-def pre_exec(server):
-    """Pre-exec handler."""
-    logger.info("Pre-exec phase")
-    server.log.info("Forked child, re-executing.")
 
 def worker_int(worker):
     """Handle worker interruption signals."""
     worker.log.info("worker received INT or QUIT signal")
-    
-    import sys
-    sys.exit(0)
 
 def worker_abort(worker):
     """Handle worker abort."""
@@ -93,23 +78,12 @@ def worker_abort(worker):
 def worker_exit(server, worker):
     """Clean up after worker exit."""
     logger.info("Worker exiting")
-    try:
-        # Get the current eventlet hub
-        hub = eventlet.hubs.get_hub()
-        if hub is not None:
-            # Stop the hub
-            hub.abort()
-            # Clear all sockets
-            if hasattr(hub, 'sockets'):
-                hub.sockets.clear()
-    except Exception as e:
-        logger.error("Error cleaning up worker: %s", e)
 
 # WebSocket settings
 websocket_max_message_size = 1024 * 1024  # 1MB
 websocket_ping_interval = 25
 websocket_ping_timeout = 60
-websocket_per_message_deflate = False  # Disable compression for stability
+websocket_per_message_deflate = True
 
 # Environment settings
 raw_env = [
@@ -128,18 +102,18 @@ worker_class_args = {
     'websocket_max_message_size': 1024 * 1024,
     'websocket_ping_interval': 25,
     'websocket_ping_timeout': 60,
-    'websocket_per_message_deflate': False,
+    'websocket_per_message_deflate': True,
     'keepalive': 65,
-    'client_timeout': 60,
-    'proxy_protocol': True,
+    'client_timeout': 120,
+    'proxy_protocol': False,
     'proxy_allow_ips': '*',
-    'graceful_timeout': 60,
-    'timeout': 300,
+    'graceful_timeout': 30,
+    'timeout': 120,
     'backlog': 2048
 }
 
 # Eventlet settings
-worker_connections = 1000
+worker_connections = 2000
 worker_rlimit_nofile = 4096
 
 def on_exit(server):

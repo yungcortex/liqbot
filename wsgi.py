@@ -35,6 +35,10 @@ def cleanup_socket(sid):
 def signal_handler(signum, frame):
     """Handle shutdown signals"""
     logger.info(f"Received signal {signum}. Starting graceful shutdown...")
+    # Clean up all active connections
+    with connection_lock:
+        for sid in list(active_connections.keys()):
+            cleanup_socket(sid)
     sys.exit(0)
 
 # Register signal handlers
@@ -51,24 +55,24 @@ socketio.init_app(
     app,
     async_mode='eventlet',
     cors_allowed_origins=["https://liqbot-038f.onrender.com"],
-    ping_timeout=20000,
-    ping_interval=10000,
+    ping_timeout=60000,  # 60 seconds
+    ping_interval=25000,  # 25 seconds
     manage_session=True,
     message_queue=None,
     always_connect=True,
-    transports=['polling', 'websocket'],
+    transports=['websocket', 'polling'],  # Prefer WebSocket
     cookie=None,
     logger=True,
     engineio_logger=True,
     async_handlers=True,
-    monitor_clients=False,
-    upgrade_timeout=20000,
+    monitor_clients=True,  # Enable client monitoring
+    upgrade_timeout=60000,  # 60 seconds
     max_http_buffer_size=1024 * 1024,
-    websocket_ping_interval=10000,
-    websocket_ping_timeout=20000,
+    websocket_ping_interval=25000,  # 25 seconds
+    websocket_ping_timeout=60000,  # 60 seconds
     cors_credentials=False,
     cors_headers=['Content-Type', 'X-Requested-With'],
-    close_timeout=20000,
+    close_timeout=60000,  # 60 seconds
     max_queue_size=100,
     reconnection=True,
     reconnection_attempts=float('inf'),
@@ -77,7 +81,7 @@ socketio.init_app(
     max_retries=float('inf'),
     retry_delay=1000,
     retry_delay_max=5000,
-    ping_interval_grace_period=2000,
+    ping_interval_grace_period=5000,  # 5 seconds
     allow_upgrades=True,
     json=True,
     http_compression=True,
@@ -174,5 +178,9 @@ if __name__ == '__main__':
         )
     except KeyboardInterrupt:
         logger.info("Received KeyboardInterrupt. Starting cleanup...")
+        # Clean up all active connections
+        with connection_lock:
+            for sid in list(active_connections.keys()):
+                cleanup_socket(sid)
     except Exception as e:
         logger.error(f"Error in main: {e}") 
