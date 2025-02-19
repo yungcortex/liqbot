@@ -45,7 +45,7 @@ socketio = SocketIO(
     manage_session=False,  # Disable session management to prevent ID mismatch
     cookie=False,
     always_connect=True,
-    transports=['websocket'],
+    transports=['polling'],
     max_http_buffer_size=1024 * 1024,
     async_handlers=True,
     monitor_clients=True,
@@ -77,7 +77,7 @@ CORS(app, resources={
 
 # Add parent directory to path to import liquidation_bot
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from liquidation_bot import stats, process_liquidation, connect_websocket, set_web_update_callback
+from liquidation_bot import stats, update_and_emit_stats, connect_all_websockets, set_web_update_callback
 
 # Store the latest statistics
 latest_stats = {
@@ -338,7 +338,8 @@ def process_liquidation_event(data):
             'side': side,
             'amount': amount,
             'price': price,
-            'value': value
+            'value': value,
+            'exchange': data.get('exchange', 'Unknown')
         }, broadcast=True)
 
         # Emit stats update
@@ -352,14 +353,7 @@ def process_liquidation_event(data):
 async def run_liquidation_bot():
     """Run the liquidation bot and forward updates to web clients"""
     set_web_update_callback(process_liquidation_event)
-    
-    while True:
-        try:
-            logger.info("Connecting to Bybit WebSocket...")
-            await connect_websocket()
-        except Exception as e:
-            logger.error(f"Error in liquidation bot: {e}")
-            await asyncio.sleep(5)
+    await connect_all_websockets()
 
 def background_tasks():
     """Run background tasks in asyncio event loop"""
