@@ -1,5 +1,5 @@
 import eventlet
-eventlet.monkey_patch()
+eventlet.monkey_patch(os=False)
 
 import os
 import logging
@@ -9,18 +9,18 @@ logger = logging.getLogger('gunicorn.error')
 
 # Server socket settings
 bind = f"0.0.0.0:{os.environ.get('PORT', '10000')}"
-backlog = 2048
+backlog = 1024
 
 # Worker processes - keep single worker for WebSocket
 workers = 1
 worker_class = "eventlet"
-worker_connections = 2000
+worker_connections = 1000
 threads = 1
 
 # Timeouts - increased for WebSocket stability
-timeout = 120
+timeout = 90
 graceful_timeout = 30
-keepalive = 65
+keepalive = 30
 
 # Logging
 accesslog = "-"
@@ -49,14 +49,14 @@ group = None
 tmp_upload_dir = None
 
 # Worker settings
-max_requests = 0
-max_requests_jitter = 0
+max_requests = 1000
+max_requests_jitter = 50
 worker_tmp_dir = None
 
 def on_starting(server):
     """Initialize server."""
     logger.info("Server starting up")
-    eventlet.hubs.use_hub()
+    eventlet.hubs.use_hub('poll')
 
 def when_ready(server):
     """Called just after the server is started."""
@@ -65,7 +65,7 @@ def when_ready(server):
 def post_fork(server, worker):
     """Set up worker after fork."""
     server.log.info("Worker spawned (pid: %s)", worker.pid)
-    eventlet.hubs.use_hub()
+    eventlet.hubs.use_hub('poll')
 
 def worker_int(worker):
     """Handle worker interruption signals."""
@@ -81,9 +81,9 @@ def worker_exit(server, worker):
 
 # WebSocket settings
 websocket_max_message_size = 1024 * 1024  # 1MB
-websocket_ping_interval = 25
-websocket_ping_timeout = 60
-websocket_per_message_deflate = True
+websocket_ping_interval = 15
+websocket_ping_timeout = 30
+websocket_per_message_deflate = False
 
 # Environment settings
 raw_env = [
@@ -98,23 +98,23 @@ buffer_size = 65535
 
 # Worker class args
 worker_class_args = {
-    'worker_connections': 2000,
+    'worker_connections': 1000,
     'websocket_max_message_size': 1024 * 1024,
-    'websocket_ping_interval': 25,
-    'websocket_ping_timeout': 60,
-    'websocket_per_message_deflate': True,
-    'keepalive': 65,
-    'client_timeout': 120,
+    'websocket_ping_interval': 15,
+    'websocket_ping_timeout': 30,
+    'websocket_per_message_deflate': False,
+    'keepalive': 30,
+    'client_timeout': 90,
     'proxy_protocol': False,
     'proxy_allow_ips': '*',
     'graceful_timeout': 30,
-    'timeout': 120,
-    'backlog': 2048
+    'timeout': 90,
+    'backlog': 1024
 }
 
 # Eventlet settings
-worker_connections = 2000
-worker_rlimit_nofile = 4096
+worker_connections = 1000
+worker_rlimit_nofile = 2048
 
 def on_exit(server):
     """Handle server shutdown."""

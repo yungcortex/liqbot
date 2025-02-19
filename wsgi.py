@@ -1,5 +1,5 @@
 import eventlet
-eventlet.monkey_patch()
+eventlet.monkey_patch(os=False)  # Don't patch os to avoid file descriptor issues
 
 from app import app, socketio, background_tasks
 import threading
@@ -16,7 +16,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Initialize eventlet hub
-eventlet.hubs.use_hub()
+eventlet.hubs.use_hub('poll')  # Use poll instead of epoll
 
 # Global state
 active_connections = {}
@@ -27,7 +27,12 @@ def cleanup_socket(sid):
     try:
         with connection_lock:
             if sid in active_connections:
-                active_connections.pop(sid, None)
+                conn = active_connections.pop(sid, None)
+                if conn and hasattr(socketio.server, 'disconnect'):
+                    try:
+                        socketio.server.disconnect(sid, namespace='/')
+                    except Exception:
+                        pass
                 logger.info(f"Cleaned up socket {sid}")
     except Exception as e:
         logger.error(f"Error cleaning up socket {sid}: {e}")
@@ -55,36 +60,36 @@ socketio.init_app(
     app,
     async_mode='eventlet',
     cors_allowed_origins=["https://liqbot-038f.onrender.com"],
-    ping_timeout=60000,  # 60 seconds
-    ping_interval=25000,  # 25 seconds
+    ping_timeout=30000,  # 30 seconds
+    ping_interval=15000,  # 15 seconds
     manage_session=True,
     message_queue=None,
     always_connect=True,
-    transports=['websocket', 'polling'],  # Prefer WebSocket
+    transports=['polling', 'websocket'],  # Start with polling
     cookie=None,
     logger=True,
     engineio_logger=True,
     async_handlers=True,
-    monitor_clients=True,  # Enable client monitoring
-    upgrade_timeout=60000,  # 60 seconds
+    monitor_clients=True,
+    upgrade_timeout=20000,
     max_http_buffer_size=1024 * 1024,
-    websocket_ping_interval=25000,  # 25 seconds
-    websocket_ping_timeout=60000,  # 60 seconds
+    websocket_ping_interval=15000,
+    websocket_ping_timeout=30000,
     cors_credentials=False,
     cors_headers=['Content-Type', 'X-Requested-With'],
-    close_timeout=60000,  # 60 seconds
+    close_timeout=30000,
     max_queue_size=100,
     reconnection=True,
-    reconnection_attempts=float('inf'),
+    reconnection_attempts=5,
     reconnection_delay=1000,
     reconnection_delay_max=5000,
-    max_retries=float('inf'),
+    max_retries=5,
     retry_delay=1000,
     retry_delay_max=5000,
-    ping_interval_grace_period=5000,  # 5 seconds
+    ping_interval_grace_period=2000,
     allow_upgrades=True,
     json=True,
-    http_compression=True,
+    http_compression=False,  # Disable compression
     compression_threshold=1024,
     max_decode_packets=50,
     max_encode_packets=50,
