@@ -252,10 +252,11 @@
                 const entry = document.createElement('div');
                 entry.className = 'terminal-line glitch-animation';
                 const side = data.side === 'LONG' ? '🔴 LONG LIQ' : '🟢 SHORT LIQ';
-                entry.innerHTML = `${new Date().toLocaleTimeString()} Processed liquidation: ${data.symbol} ${side} ${data.amount.toFixed(3)} @ ${data.price.toFixed(2)}`;
+                const exchange = data.exchange ? `[${data.exchange}]` : '';
+                entry.innerHTML = `${new Date().toLocaleTimeString()} ${exchange} ${data.symbol} ${side} ${data.amount.toFixed(3)} @ $${data.price.toFixed(2)} = $${data.value.toFixed(2)}`;
                 recentLiquidations.insertBefore(entry, recentLiquidations.firstChild);
                 
-                // Keep only last 10 entries
+                // Keep only last 100 entries
                 const maxLines = 100;
                 const lines = recentLiquidations.getElementsByClassName('terminal-line');
                 if (lines.length > maxLines) {
