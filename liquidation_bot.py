@@ -72,7 +72,11 @@ async def process_message(message, exchange):
         elif exchange == 'okx' and 'event' in data and data['event'] == 'liquidation':
             await process_okx_liquidation(data['data'])
         elif exchange == 'gate' and 'channel' in data and data['channel'] == 'futures.liquidates':
-            await process_gate_liquidation(data['result'])
+            if 'result' in data and isinstance(data['result'], list):
+                for liquidation in data['result']:
+                    await process_gate_liquidation(liquidation)
+            elif 'result' in data:
+                await process_gate_liquidation(data['result'])
             
     except Exception as e:
         logger.error(f"Error processing {exchange} message: {e}")
@@ -128,15 +132,36 @@ async def process_okx_liquidation(data):
 async def process_gate_liquidation(data):
     """Process Gate.io liquidation data"""
     try:
-        symbol = normalize_symbol(data['contract'], 'gate')
+        if not data:
+            return
+
+        # Gate.io sends data in different formats depending on the event type
+        if isinstance(data, dict):
+            symbol = normalize_symbol(data.get('contract', '').split('_')[0], 'gate')
+        elif isinstance(data, list) and len(data) >= 1:
+            symbol = normalize_symbol(data[0].split('_')[0], 'gate')
+        else:
+            logger.error(f"Unexpected Gate.io data format: {data}")
+            return
+
         if symbol not in stats:
             return
 
-        amount = float(data['size'])
-        price = float(data['price'])
-        value = amount * price
-        side = normalize_side(data['side'], 'gate')
+        try:
+            if isinstance(data, dict):
+                amount = float(data.get('size', 0))
+                price = float(data.get('price', 0))
+                side = normalize_side(data.get('side', ''), 'gate')
+            else:
+                # Handle array format if needed
+                amount = float(data[1])
+                price = float(data[2])
+                side = normalize_side('buy' if data[3] > 0 else 'sell', 'gate')
+        except (IndexError, ValueError, TypeError) as e:
+            logger.error(f"Error parsing Gate.io values: {e}")
+            return
 
+        value = amount * price
         await update_and_emit_stats(symbol, side, amount, price, value, 'Gate.io')
     except Exception as e:
         logger.error(f"Error processing Gate.io liquidation: {e}")
@@ -232,6 +257,7 @@ async def subscribe_gate():
     """Subscribe to Gate.io WebSocket"""
     try:
         async with websockets.connect(WEBSOCKET_URLS['gate']) as websocket:
+            # Initial subscription
             subscribe_message = {
                 "time": int(time.time()),
                 "channel": "futures.liquidates",
@@ -239,11 +265,22 @@ async def subscribe_gate():
                 "payload": ["BTC_USDT", "ETH_USDT", "SOL_USDT"]
             }
             await websocket.send(json.dumps(subscribe_message))
+
+            # Handle incoming messages
             while True:
-                message = await websocket.recv()
-                await process_message(message, 'gate')
+                try:
+                    message = await websocket.recv()
+                    await process_message(message, 'gate')
+                except websockets.ConnectionClosed:
+                    logger.warning("Gate.io WebSocket connection closed")
+                    break
+                except Exception as e:
+                    logger.error(f"Error in Gate.io message loop: {e}")
+                    continue
+
     except Exception as e:
         logger.error(f"Gate.io WebSocket error: {e}")
+        await asyncio.sleep(5)  # Wait before reconnecting
 
 async def connect_all_websockets():
     """Connect to all exchange WebSockets"""
