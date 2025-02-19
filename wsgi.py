@@ -7,6 +7,7 @@ import logging
 import signal
 import sys
 import time
+import json
 from eventlet import wsgi
 from flask import request
 from flask_cors import CORS
@@ -78,7 +79,7 @@ socketio.init_app(
     retry_delay_max=5000,
     ping_interval_grace_period=2000,
     allow_upgrades=False,  # Disable upgrades for now
-    json=True,
+    json=json,  # Use Python's json module
     http_compression=False,
     compression_threshold=1024,
     max_decode_packets=50,
