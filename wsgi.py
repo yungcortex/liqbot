@@ -159,7 +159,7 @@ def handle_heartbeat():
         logger.error(f"Error in handle_heartbeat: {e}")
 
 # Create WSGI application
-application = socketio.wsgi_app
+application = app
 
 # For local development
 if __name__ == '__main__':
