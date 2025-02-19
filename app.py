@@ -323,21 +323,28 @@ def process_liquidation_event(data):
             latest_stats[symbol]['shorts'] += 1
         latest_stats[symbol]['total_value'] += value
 
-        # Work with a copy of active connections
-        with connection_lock:
-            active_sids = [sid for sid in active_connections.keys() if is_socket_valid(sid)]
+        # Format data for frontend
+        frontend_data = {
+            'bitcoin' if symbol == 'BTC' else 'ethereum' if symbol == 'ETH' else 'solana': {
+                'long_liqs': latest_stats[symbol]['longs'],
+                'short_liqs': latest_stats[symbol]['shorts'],
+                'total_value': latest_stats[symbol]['total_value']
+            }
+        }
+
+        # Emit liquidation event
+        socketio.emit('liquidation', {
+            'symbol': symbol,
+            'side': side,
+            'amount': amount,
+            'price': price,
+            'value': value
+        }, broadcast=True)
+
+        # Emit stats update
+        socketio.emit('stats_update', frontend_data, broadcast=True)
         
-        # Emit events to each active connection individually
-        for sid in active_sids:
-            try:
-                socketio.emit('liquidation', data, room=sid)
-                socketio.sleep(0)
-                socketio.emit('stats_update', latest_stats, room=sid)
-                socketio.sleep(0)
-            except Exception as e:
-                logger.error(f"Error emitting to {sid}: {e}")
-                with connection_lock:
-                    active_connections.pop(sid, None)
+        logger.info(f"Emitted liquidation event and stats update: {data}")
 
     except Exception as e:
         logger.error(f"Error processing liquidation: {e}")
