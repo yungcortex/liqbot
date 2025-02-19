@@ -76,34 +76,34 @@ socketio.init_app(
     app,
     async_mode='eventlet',
     cors_allowed_origins=["https://liqbot-038f.onrender.com"],
-    ping_timeout=20000,
-    ping_interval=10000,
-    manage_session=False,  # Disable built-in session management
+    ping_timeout=60000,  # Increased timeout
+    ping_interval=25000,  # Increased interval
+    manage_session=True,  # Re-enable session management
     message_queue=None,
     always_connect=True,
-    transports=['polling', 'websocket'],  # Enable both transports
+    transports=['polling'],  # Only use polling for now
     cookie=None,
     logger=True,
     engineio_logger=True,
     async_handlers=True,
     monitor_clients=True,
-    upgrade_timeout=10000,
+    upgrade_timeout=20000,
     max_http_buffer_size=1024 * 1024,
     cors_credentials=False,
     cors_headers=['Content-Type', 'X-Requested-With'],
-    close_timeout=20000,
+    close_timeout=60000,  # Increased timeout
     max_queue_size=100,
     reconnection=True,
-    reconnection_attempts=10,
+    reconnection_attempts=5,
     reconnection_delay=1000,
     reconnection_delay_max=5000,
-    max_retries=10,
+    max_retries=5,
     retry_delay=1000,
     retry_delay_max=5000,
-    ping_interval_grace_period=2000,
-    allow_upgrades=True,  # Allow transport upgrades
+    ping_interval_grace_period=5000,
+    allow_upgrades=False,  # Disable upgrades for now
     json=json,
-    http_compression=True,
+    http_compression=False,
     compression_threshold=1024,
     max_decode_packets=50,
     max_encode_packets=50,
@@ -117,7 +117,7 @@ CORS(app, resources={
         "origins": ["https://liqbot-038f.onrender.com"],
         "methods": ["GET", "POST", "OPTIONS"],
         "allow_headers": ["Content-Type", "X-Requested-With"],
-        "supports_credentials": False,
+        "supports_credentials": True,  # Enable credentials
         "max_age": 3600
     }
 })
@@ -134,21 +134,14 @@ def handle_connect():
         logger.info(f"New connection: {sid}")
         
         with connection_lock:
-            # Get the Engine.IO socket
-            socket = socketio.server.eio.sockets.get(sid)
-            
             # Store connection info
             active_connections[sid] = {
                 'connected_at': time.time(),
-                'last_heartbeat': time.time(),
-                'socket': socket
+                'last_heartbeat': time.time()
             }
             
-        # Join the default room
-        socketio.server.enter_room(sid, sid, namespace='/')
-        
         # Emit initial connection success
-        socketio.emit('connection_status', {'status': 'connected', 'sid': sid}, room=sid)
+        socketio.emit('connection_status', {'status': 'connected'}, room=sid)
         
         # Emit initial data
         socketio.emit('initial_data', {
@@ -176,6 +169,17 @@ def handle_disconnect():
     except Exception as e:
         logger.error(f"Error in handle_disconnect: {e}")
 
+@socketio.on('error')
+def handle_error(error):
+    """Handle socket errors"""
+    try:
+        sid = request.sid
+        logger.error(f"Socket error for {sid}: {error}")
+        if sid:
+            cleanup_socket(sid)
+    except Exception as e:
+        logger.error(f"Error in handle_error: {e}")
+
 @socketio.on('heartbeat')
 def handle_heartbeat():
     """Handle client heartbeat"""
@@ -184,7 +188,7 @@ def handle_heartbeat():
         if sid in active_connections:
             with connection_lock:
                 active_connections[sid]['last_heartbeat'] = time.time()
-            socketio.emit('heartbeat_response', {'status': 'alive', 'sid': sid}, room=sid)
+            socketio.emit('heartbeat_response', {'status': 'alive'}, room=sid)
     except Exception as e:
         logger.error(f"Error in handle_heartbeat: {e}")
 

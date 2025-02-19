@@ -201,29 +201,30 @@
 
     <script>
         document.addEventListener('DOMContentLoaded', function() {
-            // Initialize Socket.IO connection with better configuration
+            // Initialize Socket.IO connection with conservative settings
             const socket = io({
-                transports: ['polling', 'websocket'],
+                transports: ['polling'],
                 reconnection: true,
-                reconnectionAttempts: 10,
+                reconnectionAttempts: 5,
                 reconnectionDelay: 1000,
                 reconnectionDelayMax: 5000,
-                timeout: 20000,
+                timeout: 60000,
                 autoConnect: true,
-                forceNew: true,
+                forceNew: false,
                 closeOnBeforeunload: false,
                 rejectUnauthorized: false,
                 path: '/socket.io/',
-                query: {},
-                extraHeaders: {},
-                withCredentials: false
+                withCredentials: true,
+                upgrade: false,
+                rememberUpgrade: false,
+                pingTimeout: 60000,
+                pingInterval: 25000
             });
 
             // Connection status elements
             const statusElement = document.getElementById('connection-status');
             const recentLiquidations = document.getElementById('liquidation-feed');
             let reconnectAttempts = 0;
-            let currentSid = null;
 
             // Stats elements
             const stats = {
@@ -258,14 +259,12 @@
                 console.log('Disconnected from server:', reason);
                 
                 // Handle reconnection
-                if (reason === 'io server disconnect' || reason === 'transport close') {
-                    if (reconnectAttempts < 10) {
-                        reconnectAttempts++;
-                        console.log(`Attempting to reconnect (${reconnectAttempts}/10)...`);
-                        setTimeout(() => {
-                            socket.connect();
-                        }, 1000 * Math.min(reconnectAttempts, 5));
-                    }
+                if (reconnectAttempts < 5) {
+                    reconnectAttempts++;
+                    console.log(`Attempting to reconnect (${reconnectAttempts}/5)...`);
+                    setTimeout(() => {
+                        socket.connect();
+                    }, 1000 * Math.min(reconnectAttempts, 5));
                 }
             });
 
@@ -275,8 +274,13 @@
                 statusElement.className = 'disconnected';
             });
 
+            socket.on('error', (error) => {
+                console.error('Socket error:', error);
+                statusElement.textContent = `Socket Error: ${error.message}`;
+                statusElement.className = 'disconnected';
+            });
+
             socket.on('connection_status', (data) => {
-                currentSid = data.sid;
                 console.log('Connection status:', data);
             });
 
@@ -335,11 +339,11 @@
                 heartbeatInterval = setInterval(() => {
                     if (socket.connected) {
                         socket.emit('heartbeat');
-                    } else if (reconnectAttempts < 10) {
+                    } else if (reconnectAttempts < 5) {
                         console.log('Socket disconnected, attempting to reconnect...');
                         socket.connect();
                     }
-                }, 10000);
+                }, 25000);  // Match server's ping interval
             }
 
             startHeartbeat();
@@ -349,9 +353,7 @@
                 if (heartbeatInterval) {
                     clearInterval(heartbeatInterval);
                 }
-                if (socket.connected) {
-                    socket.disconnect();
-                }
+                socket.disconnect();
             });
         });
     </script>
