@@ -46,9 +46,6 @@ bot_thread = threading.Thread(target=background_tasks)
 bot_thread.daemon = True
 bot_thread.start()
 
-# Create Flask application
-application = app
-
 # Initialize Socket.IO with improved settings
 socketio.init_app(
     app,
@@ -161,8 +158,8 @@ def handle_heartbeat():
     except Exception as e:
         logger.error(f"Error in handle_heartbeat: {e}")
 
-# Wrap the Flask app with Socket.IO
-application = socketio.middleware(application)
+# Create WSGI application
+application = socketio.wsgi_app
 
 # For local development
 if __name__ == '__main__':
