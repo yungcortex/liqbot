@@ -8,27 +8,48 @@ import signal
 import sys
 import time
 import json
+import os
 from eventlet import wsgi
 from flask import request, session
 from flask_cors import CORS
 import redis
 from flask_session import Session
+from urllib.parse import urlparse
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Configure Redis
-redis_client = redis.Redis(
-    host='localhost',
-    port=6379,
-    db=0,
-    decode_responses=True
-)
+REDIS_URL = os.getenv('REDIS_URL', 'redis://localhost:6379')
+try:
+    # Parse Redis URL
+    redis_url = urlparse(REDIS_URL)
+    redis_client = redis.Redis(
+        host=redis_url.hostname or 'localhost',
+        port=int(redis_url.port or 6379),
+        username=redis_url.username,
+        password=redis_url.password,
+        db=0,
+        decode_responses=True,
+        socket_timeout=5,
+        socket_connect_timeout=5,
+        retry_on_timeout=True,
+        health_check_interval=30
+    )
+    # Test Redis connection
+    redis_client.ping()
+    logger.info("Successfully connected to Redis")
+except Exception as e:
+    logger.error(f"Failed to connect to Redis: {e}")
+    redis_client = None
 
 # Configure Flask session
 app.config['SESSION_TYPE'] = 'redis'
 app.config['SESSION_REDIS'] = redis_client
+app.config['SESSION_USE_SIGNER'] = True
+app.config['SESSION_PERMANENT'] = False
+app.config['PERMANENT_SESSION_LIFETIME'] = 3600  # 1 hour
 Session(app)
 
 # Global state
@@ -40,11 +61,12 @@ def cleanup_socket(sid):
     try:
         with connection_lock:
             if sid in active_connections:
-                # Remove from Redis
-                try:
-                    redis_client.delete(f"socket:{sid}")
-                except Exception as e:
-                    logger.error(f"Error removing socket from Redis: {e}")
+                # Remove from Redis if available
+                if redis_client:
+                    try:
+                        redis_client.delete(f"socket:{sid}")
+                    except Exception as e:
+                        logger.error(f"Error removing socket from Redis: {e}")
                 
                 # Remove from active connections
                 active_connections.pop(sid, None)
@@ -71,44 +93,48 @@ bot_thread.daemon = True
 bot_thread.start()
 
 # Initialize Socket.IO with optimized settings
-socketio.init_app(
-    app,
-    async_mode='eventlet',
-    cors_allowed_origins=["https://liqbot-038f.onrender.com"],
-    ping_timeout=60000,
-    ping_interval=25000,
-    manage_session=True,
-    message_queue='redis://localhost:6379/0',
-    always_connect=True,
-    transports=['polling'],
-    cookie=None,
-    logger=True,
-    engineio_logger=True,
-    async_handlers=True,
-    monitor_clients=True,
-    upgrade_timeout=20000,
-    max_http_buffer_size=1024 * 1024,
-    cors_credentials=True,
-    cors_headers=['Content-Type', 'X-Requested-With'],
-    close_timeout=60000,
-    max_queue_size=100,
-    reconnection=True,
-    reconnection_attempts=5,
-    reconnection_delay=1000,
-    reconnection_delay_max=5000,
-    max_retries=5,
-    retry_delay=1000,
-    retry_delay_max=5000,
-    ping_interval_grace_period=5000,
-    allow_upgrades=False,
-    json=json,
-    http_compression=False,
-    compression_threshold=1024,
-    max_decode_packets=50,
-    max_encode_packets=50,
-    handle_sigint=False,
-    namespace='/'
-)
+socketio_config = {
+    'async_mode': 'eventlet',
+    'cors_allowed_origins': ["https://liqbot-038f.onrender.com"],
+    'ping_timeout': 60000,
+    'ping_interval': 25000,
+    'manage_session': True,
+    'always_connect': True,
+    'transports': ['polling'],
+    'cookie': None,
+    'logger': True,
+    'engineio_logger': True,
+    'async_handlers': True,
+    'monitor_clients': True,
+    'upgrade_timeout': 20000,
+    'max_http_buffer_size': 1024 * 1024,
+    'cors_credentials': True,
+    'cors_headers': ['Content-Type', 'X-Requested-With'],
+    'close_timeout': 60000,
+    'max_queue_size': 100,
+    'reconnection': True,
+    'reconnection_attempts': 5,
+    'reconnection_delay': 1000,
+    'reconnection_delay_max': 5000,
+    'max_retries': 5,
+    'retry_delay': 1000,
+    'retry_delay_max': 5000,
+    'ping_interval_grace_period': 5000,
+    'allow_upgrades': False,
+    'json': json,
+    'http_compression': False,
+    'compression_threshold': 1024,
+    'max_decode_packets': 50,
+    'max_encode_packets': 50,
+    'handle_sigint': False,
+    'namespace': '/'
+}
+
+# Add message queue configuration if Redis is available
+if redis_client:
+    socketio_config['message_queue'] = REDIS_URL
+
+socketio.init_app(app, **socketio_config)
 
 # Configure CORS for Flask app
 CORS(app, resources={
@@ -132,13 +158,18 @@ def handle_connect():
 
         logger.info(f"New connection: {sid}")
         
-        # Store session data in Redis
+        # Store session data in memory and Redis if available
         session_data = {
             'connected_at': int(time.time()),
             'last_heartbeat': int(time.time())
         }
-        redis_client.hmset(f"socket:{sid}", session_data)
-        redis_client.expire(f"socket:{sid}", 3600)  # Expire after 1 hour
+        
+        if redis_client:
+            try:
+                redis_client.hmset(f"socket:{sid}", session_data)
+                redis_client.expire(f"socket:{sid}", 3600)  # Expire after 1 hour
+            except Exception as e:
+                logger.error(f"Error storing session in Redis: {e}")
         
         with connection_lock:
             active_connections[sid] = session_data
@@ -191,20 +222,49 @@ def handle_heartbeat():
         if not sid:
             return
             
-        # Update heartbeat in Redis
-        try:
-            redis_client.hset(f"socket:{sid}", "last_heartbeat", int(time.time()))
-            redis_client.expire(f"socket:{sid}", 3600)  # Reset expiration
-        except Exception as e:
-            logger.error(f"Error updating Redis heartbeat: {e}")
+        current_time = int(time.time())
             
+        # Update heartbeat in Redis if available
+        if redis_client:
+            try:
+                redis_client.hset(f"socket:{sid}", "last_heartbeat", current_time)
+                redis_client.expire(f"socket:{sid}", 3600)  # Reset expiration
+            except Exception as e:
+                logger.error(f"Error updating Redis heartbeat: {e}")
+            
+        # Always update in-memory state
         with connection_lock:
             if sid in active_connections:
-                active_connections[sid]['last_heartbeat'] = time.time()
+                active_connections[sid]['last_heartbeat'] = current_time
                 
         socketio.emit('heartbeat_response', {'status': 'alive'}, room=sid)
     except Exception as e:
         logger.error(f"Error in handle_heartbeat: {e}")
+
+def cleanup_stale_connections():
+    """Clean up stale connections periodically"""
+    while True:
+        try:
+            current_time = time.time()
+            with connection_lock:
+                # Work with a copy of the connections to avoid modification during iteration
+                connections = dict(active_connections)
+                for sid, data in connections.items():
+                    try:
+                        # Check if connection is stale (no heartbeat for 30 seconds)
+                        if current_time - data['last_heartbeat'] > 30:
+                            logger.info(f"Cleaning up stale connection: {sid}")
+                            cleanup_socket(sid)
+                    except Exception as e:
+                        logger.error(f"Error checking connection {sid}: {e}")
+                        cleanup_socket(sid)
+        except Exception as e:
+            logger.error(f"Error in cleanup thread: {e}")
+        time.sleep(10)  # Run cleanup every 10 seconds
+
+# Start cleanup thread
+cleanup_thread = threading.Thread(target=cleanup_stale_connections, daemon=True)
+cleanup_thread.start()
 
 # Create WSGI application
 application = app
