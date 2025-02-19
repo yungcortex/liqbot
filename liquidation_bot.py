@@ -100,18 +100,47 @@ async def process_bybit_liquidation(data):
 async def process_binance_liquidation(data):
     """Process Binance liquidation data"""
     try:
+        # Check if data has the expected structure
+        if not isinstance(data, dict):
+            logger.error(f"Invalid Binance data format: {data}")
+            return
+            
+        # Handle different message types
+        if 'e' not in data:
+            logger.debug(f"Ignoring non-liquidation Binance message: {data}")
+            return
+            
+        if data['e'] != 'forceOrder':
+            logger.debug(f"Ignoring Binance message type: {data['e']}")
+            return
+            
+        # Extract required fields with validation
+        required_fields = {'s': 'symbol', 'S': 'side', 'q': 'quantity', 'p': 'price'}
+        for key, name in required_fields.items():
+            if key not in data:
+                logger.error(f"Missing {name} in Binance liquidation data: {data}")
+                return
+                
         symbol = normalize_symbol(data['s'], 'binance')
         if symbol not in stats:
+            logger.debug(f"Ignoring unsupported Binance symbol: {symbol}")
             return
 
-        amount = float(data['q'])
-        price = float(data['p'])
-        value = amount * price
+        try:
+            amount = float(data['q'])
+            price = float(data['p'])
+            value = amount * price
+        except (ValueError, TypeError) as e:
+            logger.error(f"Error converting Binance numeric values: {e}")
+            return
+            
         side = normalize_side(data['S'], 'binance')
 
         await update_and_emit_stats(symbol, side, amount, price, value, 'Binance')
+        
     except Exception as e:
-        logger.error(f"Error processing Binance liquidation: {e}")
+        logger.error(f"Error processing Binance liquidation: {str(e)}")
+        logger.debug(f"Problematic data: {data}", exc_info=True)
 
 async def process_okx_liquidation(data):
     """Process OKX liquidation data"""
