@@ -201,21 +201,29 @@
 
     <script>
         document.addEventListener('DOMContentLoaded', function() {
-            // Initialize Socket.IO connection
+            // Initialize Socket.IO connection with better configuration
             const socket = io({
-                transports: ['polling'],
+                transports: ['polling', 'websocket'],
                 reconnection: true,
-                reconnectionAttempts: 5,
+                reconnectionAttempts: 10,
                 reconnectionDelay: 1000,
                 reconnectionDelayMax: 5000,
                 timeout: 20000,
+                autoConnect: true,
                 forceNew: true,
-                closeOnBeforeunload: true
+                closeOnBeforeunload: false,
+                rejectUnauthorized: false,
+                path: '/socket.io/',
+                query: {},
+                extraHeaders: {},
+                withCredentials: false
             });
 
             // Connection status elements
             const statusElement = document.getElementById('connection-status');
             const recentLiquidations = document.getElementById('liquidation-feed');
+            let reconnectAttempts = 0;
+            let currentSid = null;
 
             // Stats elements
             const stats = {
@@ -235,6 +243,57 @@
                     totalValue: document.querySelector('#sol-total')
                 }
             };
+
+            // Socket event handlers
+            socket.on('connect', () => {
+                statusElement.textContent = 'Connected';
+                statusElement.className = 'connected';
+                reconnectAttempts = 0;
+                console.log('Connected to server');
+            });
+
+            socket.on('disconnect', (reason) => {
+                statusElement.textContent = `Disconnected (${reason})`;
+                statusElement.className = 'disconnected';
+                console.log('Disconnected from server:', reason);
+                
+                // Handle reconnection
+                if (reason === 'io server disconnect' || reason === 'transport close') {
+                    if (reconnectAttempts < 10) {
+                        reconnectAttempts++;
+                        console.log(`Attempting to reconnect (${reconnectAttempts}/10)...`);
+                        setTimeout(() => {
+                            socket.connect();
+                        }, 1000 * Math.min(reconnectAttempts, 5));
+                    }
+                }
+            });
+
+            socket.on('connect_error', (error) => {
+                console.error('Connection error:', error);
+                statusElement.textContent = `Connection Error: ${error.message}`;
+                statusElement.className = 'disconnected';
+            });
+
+            socket.on('connection_status', (data) => {
+                currentSid = data.sid;
+                console.log('Connection status:', data);
+            });
+
+            socket.on('initial_data', (data) => {
+                console.log('Received initial data:', data);
+                updateStats(data);
+            });
+
+            socket.on('stats_update', (data) => {
+                console.log('Received stats update:', data);
+                updateStats(data);
+            });
+
+            socket.on('liquidation', (data) => {
+                console.log('Received liquidation:', data);
+                addLiquidation(data);
+            });
 
             // Update UI function
             function updateStats(data) {
@@ -266,40 +325,34 @@
                 }
             }
 
-            // Socket event handlers
-            socket.on('connect', () => {
-                statusElement.textContent = 'Connected';
-                statusElement.className = 'connected';
-                console.log('Connected to server');
-            });
-
-            socket.on('disconnect', () => {
-                statusElement.textContent = 'Disconnected';
-                statusElement.className = 'disconnected';
-                console.log('Disconnected from server');
-            });
-
-            socket.on('initial_data', (data) => {
-                console.log('Received initial data:', data);
-                updateStats(data);
-            });
-
-            socket.on('stats_update', (data) => {
-                console.log('Received stats update:', data);
-                updateStats(data);
-            });
-
-            socket.on('liquidation', (data) => {
-                console.log('Received liquidation:', data);
-                addLiquidation(data);
-            });
-
-            // Heartbeat
-            setInterval(() => {
-                if (socket.connected) {
-                    socket.emit('heartbeat');
+            // Heartbeat with retry mechanism
+            let heartbeatInterval;
+            function startHeartbeat() {
+                if (heartbeatInterval) {
+                    clearInterval(heartbeatInterval);
                 }
-            }, 10000);
+                
+                heartbeatInterval = setInterval(() => {
+                    if (socket.connected) {
+                        socket.emit('heartbeat');
+                    } else if (reconnectAttempts < 10) {
+                        console.log('Socket disconnected, attempting to reconnect...');
+                        socket.connect();
+                    }
+                }, 10000);
+            }
+
+            startHeartbeat();
+
+            // Clean up on page unload
+            window.addEventListener('beforeunload', () => {
+                if (heartbeatInterval) {
+                    clearInterval(heartbeatInterval);
+                }
+                if (socket.connected) {
+                    socket.disconnect();
+                }
+            });
         });
     </script>
 </body>

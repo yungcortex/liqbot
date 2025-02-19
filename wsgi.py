@@ -25,6 +25,29 @@ def cleanup_socket(sid):
     try:
         with connection_lock:
             if sid in active_connections:
+                # Get the socket instance
+                socket = active_connections[sid].get('socket')
+                
+                # Clean up rooms if they exist
+                if hasattr(socketio.server, 'rooms'):
+                    try:
+                        rooms = list(socketio.server.rooms(sid, '/'))
+                        for room in rooms:
+                            try:
+                                socketio.server.leave_room(sid, room, '/')
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+                
+                # Close socket if it exists
+                if socket and hasattr(socket, 'close'):
+                    try:
+                        socket.close()
+                    except Exception:
+                        pass
+                
+                # Remove from active connections
                 active_connections.pop(sid, None)
                 logger.info(f"Cleaned up socket {sid}")
     except Exception as e:
@@ -48,17 +71,17 @@ bot_thread = threading.Thread(target=background_tasks)
 bot_thread.daemon = True
 bot_thread.start()
 
-# Initialize Socket.IO with simplified settings
+# Initialize Socket.IO with optimized settings
 socketio.init_app(
     app,
     async_mode='eventlet',
     cors_allowed_origins=["https://liqbot-038f.onrender.com"],
     ping_timeout=20000,
     ping_interval=10000,
-    manage_session=True,
+    manage_session=False,  # Disable built-in session management
     message_queue=None,
     always_connect=True,
-    transports=['polling'],  # Only use polling for now
+    transports=['polling', 'websocket'],  # Enable both transports
     cookie=None,
     logger=True,
     engineio_logger=True,
@@ -71,16 +94,16 @@ socketio.init_app(
     close_timeout=20000,
     max_queue_size=100,
     reconnection=True,
-    reconnection_attempts=5,
+    reconnection_attempts=10,
     reconnection_delay=1000,
     reconnection_delay_max=5000,
-    max_retries=5,
+    max_retries=10,
     retry_delay=1000,
     retry_delay_max=5000,
     ping_interval_grace_period=2000,
-    allow_upgrades=False,  # Disable upgrades for now
-    json=json,  # Use Python's json module
-    http_compression=False,
+    allow_upgrades=True,  # Allow transport upgrades
+    json=json,
+    http_compression=True,
     compression_threshold=1024,
     max_decode_packets=50,
     max_encode_packets=50,
@@ -111,13 +134,21 @@ def handle_connect():
         logger.info(f"New connection: {sid}")
         
         with connection_lock:
+            # Get the Engine.IO socket
+            socket = socketio.server.eio.sockets.get(sid)
+            
+            # Store connection info
             active_connections[sid] = {
                 'connected_at': time.time(),
-                'last_heartbeat': time.time()
+                'last_heartbeat': time.time(),
+                'socket': socket
             }
             
+        # Join the default room
+        socketio.server.enter_room(sid, sid, namespace='/')
+        
         # Emit initial connection success
-        socketio.emit('connection_status', {'status': 'connected'}, room=sid)
+        socketio.emit('connection_status', {'status': 'connected', 'sid': sid}, room=sid)
         
         # Emit initial data
         socketio.emit('initial_data', {
@@ -153,7 +184,7 @@ def handle_heartbeat():
         if sid in active_connections:
             with connection_lock:
                 active_connections[sid]['last_heartbeat'] = time.time()
-            socketio.emit('heartbeat_response', {'status': 'alive'}, room=sid)
+            socketio.emit('heartbeat_response', {'status': 'alive', 'sid': sid}, room=sid)
     except Exception as e:
         logger.error(f"Error in handle_heartbeat: {e}")
 
