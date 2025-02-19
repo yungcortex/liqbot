@@ -7,7 +7,8 @@
     <title>Crypto Liquidation Tracker</title>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
         
@@ -200,162 +201,187 @@
     </div>
 
     <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            // Initialize Socket.IO connection with conservative settings
-            const socket = io({
-                transports: ['polling'],
-                reconnection: true,
-                reconnectionAttempts: 5,
-                reconnectionDelay: 1000,
-                reconnectionDelayMax: 5000,
-                timeout: 60000,
-                autoConnect: true,
-                forceNew: false,
-                closeOnBeforeunload: false,
-                rejectUnauthorized: false,
-                path: '/socket.io/',
-                withCredentials: true,
-                upgrade: false,
-                rememberUpgrade: false,
-                pingTimeout: 60000,
-                pingInterval: 25000
-            });
-
-            // Connection status elements
-            const statusElement = document.getElementById('connection-status');
-            const recentLiquidations = document.getElementById('liquidation-feed');
-            let reconnectAttempts = 0;
-
-            // Stats elements
-            const stats = {
-                bitcoin: {
-                    longLiqs: document.querySelector('#btc-longs'),
-                    shortLiqs: document.querySelector('#btc-shorts'),
-                    totalValue: document.querySelector('#btc-total')
-                },
-                ethereum: {
-                    longLiqs: document.querySelector('#eth-longs'),
-                    shortLiqs: document.querySelector('#eth-shorts'),
-                    totalValue: document.querySelector('#eth-total')
-                },
-                solana: {
-                    longLiqs: document.querySelector('#sol-longs'),
-                    shortLiqs: document.querySelector('#sol-shorts'),
-                    totalValue: document.querySelector('#sol-total')
-                }
-            };
-
-            // Socket event handlers
-            socket.on('connect', () => {
-                statusElement.textContent = 'Connected';
-                statusElement.className = 'connected';
-                reconnectAttempts = 0;
-                console.log('Connected to server');
-            });
-
-            socket.on('disconnect', (reason) => {
-                statusElement.textContent = `Disconnected (${reason})`;
-                statusElement.className = 'disconnected';
-                console.log('Disconnected from server:', reason);
-                
-                // Handle reconnection
-                if (reconnectAttempts < 5) {
-                    reconnectAttempts++;
-                    console.log(`Attempting to reconnect (${reconnectAttempts}/5)...`);
-                    setTimeout(() => {
-                        socket.connect();
-                    }, 1000 * Math.min(reconnectAttempts, 5));
-                }
-            });
-
-            socket.on('connect_error', (error) => {
-                console.error('Connection error:', error);
-                statusElement.textContent = `Connection Error: ${error.message}`;
-                statusElement.className = 'disconnected';
-            });
-
-            socket.on('error', (error) => {
-                console.error('Socket error:', error);
-                statusElement.textContent = `Socket Error: ${error.message}`;
-                statusElement.className = 'disconnected';
-            });
-
-            socket.on('connection_status', (data) => {
-                console.log('Connection status:', data);
-            });
-
-            socket.on('initial_data', (data) => {
-                console.log('Received initial data:', data);
-                updateStats(data);
-            });
-
-            socket.on('stats_update', (data) => {
-                console.log('Received stats update:', data);
-                updateStats(data);
-            });
-
-            socket.on('liquidation', (data) => {
-                console.log('Received liquidation:', data);
-                addLiquidation(data);
-            });
-
-            // Update UI function
-            function updateStats(data) {
-                for (const [coin, values] of Object.entries(data)) {
-                    if (stats[coin]) {
-                        stats[coin].longLiqs.textContent = values.long_liqs;
-                        stats[coin].shortLiqs.textContent = values.short_liqs;
-                        stats[coin].totalValue.textContent = `$${values.total_value.toLocaleString()}`;
-                    }
-                }
-            }
-
-            // Add liquidation to recent list
-            function addLiquidation(data) {
-                const entry = document.createElement('div');
-                entry.className = 'terminal-line glitch-animation';
-                const side = data.side === 'LONG' ? '🔴 LONG LIQ' : '🟢 SHORT LIQ';
-                const exchange = data.exchange ? `[${data.exchange}]` : '';
-                entry.innerHTML = `${new Date().toLocaleTimeString()} ${exchange} ${data.symbol} ${side} ${data.amount.toFixed(3)} @ $${data.price.toFixed(2)} = $${data.value.toFixed(2)}`;
-                recentLiquidations.insertBefore(entry, recentLiquidations.firstChild);
-                
-                // Keep only last 100 entries
-                const maxLines = 100;
-                const lines = recentLiquidations.getElementsByClassName('terminal-line');
-                if (lines.length > maxLines) {
-                    for (let i = maxLines; i < lines.length; i++) {
-                        lines[i].remove();
-                    }
-                }
-            }
-
-            // Heartbeat with retry mechanism
-            let heartbeatInterval;
-            function startHeartbeat() {
-                if (heartbeatInterval) {
-                    clearInterval(heartbeatInterval);
-                }
-                
-                heartbeatInterval = setInterval(() => {
-                    if (socket.connected) {
-                        socket.emit('heartbeat');
-                    } else if (reconnectAttempts < 5) {
-                        console.log('Socket disconnected, attempting to reconnect...');
-                        socket.connect();
-                    }
-                }, 25000);  // Match server's ping interval
-            }
-
-            startHeartbeat();
-
-            // Clean up on page unload
-            window.addEventListener('beforeunload', () => {
-                if (heartbeatInterval) {
-                    clearInterval(heartbeatInterval);
-                }
-                socket.disconnect();
-            });
+        // Socket.IO configuration with Redis session support
+        const socket = io('https://liqbot-038f.onrender.com', {
+            transports: ['polling'],
+            reconnection: true,
+            reconnectionAttempts: 5,
+            reconnectionDelay: 1000,
+            reconnectionDelayMax: 5000,
+            timeout: 60000,
+            autoConnect: true,
+            withCredentials: true,
+            forceNew: false,
+            upgrade: false,
+            rejectUnauthorized: false
         });
+
+        // Connection status element
+        const connectionStatus = document.getElementById('connection-status');
+        let reconnectAttempts = 0;
+        let heartbeatInterval = null;
+        let reconnectTimeout = null;
+
+        // Connection event handlers
+        socket.on('connect', () => {
+            console.log('Connected to server');
+            connectionStatus.textContent = 'Connected';
+            connectionStatus.className = 'connection-status connected';
+            reconnectAttempts = 0;
+            startHeartbeat();
+        });
+
+        socket.on('disconnect', (reason) => {
+            console.log('Disconnected:', reason);
+            connectionStatus.textContent = 'Disconnected';
+            connectionStatus.className = 'connection-status disconnected';
+            clearInterval(heartbeatInterval);
+            
+            if (reason === 'io server disconnect' || reason === 'transport close') {
+                // Server initiated disconnect, attempt reconnect
+                handleReconnect();
+            }
+        });
+
+        socket.on('connect_error', (error) => {
+            console.error('Connection error:', error);
+            connectionStatus.textContent = 'Connection Error';
+            connectionStatus.className = 'connection-status error';
+            handleReconnect();
+        });
+
+        socket.on('error', (error) => {
+            console.error('Socket error:', error);
+            connectionStatus.textContent = 'Error';
+            connectionStatus.className = 'connection-status error';
+            if (error.message === 'Invalid session') {
+                socket.disconnect();
+                handleReconnect();
+            }
+        });
+
+        // Heartbeat mechanism
+        function startHeartbeat() {
+            if (heartbeatInterval) {
+                clearInterval(heartbeatInterval);
+            }
+            
+            heartbeatInterval = setInterval(() => {
+                if (socket.connected) {
+                    socket.emit('heartbeat');
+                }
+            }, 15000);
+        }
+
+        socket.on('heartbeat_response', (data) => {
+            if (data.status === 'alive') {
+                connectionStatus.textContent = 'Connected';
+                connectionStatus.className = 'connection-status connected';
+            }
+        });
+
+        // Reconnection handler with exponential backoff
+        function handleReconnect() {
+            if (reconnectTimeout) {
+                clearTimeout(reconnectTimeout);
+            }
+
+            if (reconnectAttempts < 5) {
+                const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 5000);
+                reconnectAttempts++;
+                
+                connectionStatus.textContent = `Reconnecting (Attempt ${reconnectAttempts}/5)...`;
+                connectionStatus.className = 'connection-status reconnecting';
+                
+                reconnectTimeout = setTimeout(() => {
+                    if (!socket.connected) {
+                        socket.connect();
+                    }
+                }, delay);
+            } else {
+                connectionStatus.textContent = 'Connection Failed';
+                connectionStatus.className = 'connection-status failed';
+                console.error('Max reconnection attempts reached');
+            }
+        }
+
+        // Clean up on page unload
+        window.addEventListener('beforeunload', () => {
+            if (heartbeatInterval) {
+                clearInterval(heartbeatInterval);
+            }
+            if (reconnectTimeout) {
+                clearTimeout(reconnectTimeout);
+            }
+            if (socket.connected) {
+                socket.disconnect();
+            }
+        });
+
+        // Stats elements
+        const stats = {
+            bitcoin: {
+                longLiqs: document.querySelector('#btc-longs'),
+                shortLiqs: document.querySelector('#btc-shorts'),
+                totalValue: document.querySelector('#btc-total')
+            },
+            ethereum: {
+                longLiqs: document.querySelector('#eth-longs'),
+                shortLiqs: document.querySelector('#eth-shorts'),
+                totalValue: document.querySelector('#eth-total')
+            },
+            solana: {
+                longLiqs: document.querySelector('#sol-longs'),
+                shortLiqs: document.querySelector('#sol-shorts'),
+                totalValue: document.querySelector('#sol-total')
+            }
+        };
+
+        // Socket event handlers
+        socket.on('initial_data', (data) => {
+            console.log('Received initial data:', data);
+            updateStats(data);
+        });
+
+        socket.on('stats_update', (data) => {
+            console.log('Received stats update:', data);
+            updateStats(data);
+        });
+
+        socket.on('liquidation', (data) => {
+            console.log('Received liquidation:', data);
+            addLiquidation(data);
+        });
+
+        // Update UI function
+        function updateStats(data) {
+            for (const [coin, values] of Object.entries(data)) {
+                if (stats[coin]) {
+                    stats[coin].longLiqs.textContent = values.long_liqs;
+                    stats[coin].shortLiqs.textContent = values.short_liqs;
+                    stats[coin].totalValue.textContent = `$${values.total_value.toLocaleString()}`;
+                }
+            }
+        }
+
+        // Add liquidation to recent list
+        function addLiquidation(data) {
+            const entry = document.createElement('div');
+            entry.className = 'terminal-line glitch-animation';
+            const side = data.side === 'LONG' ? '🔴 LONG LIQ' : '🟢 SHORT LIQ';
+            const exchange = data.exchange ? `[${data.exchange}]` : '';
+            entry.innerHTML = `${new Date().toLocaleTimeString()} ${exchange} ${data.symbol} ${side} ${data.amount.toFixed(3)} @ $${data.price.toFixed(2)} = $${data.value.toFixed(2)}`;
+            recentLiquidations.insertBefore(entry, recentLiquidations.firstChild);
+            
+            // Keep only last 100 entries
+            const maxLines = 100;
+            const lines = recentLiquidations.getElementsByClassName('terminal-line');
+            if (lines.length > maxLines) {
+                for (let i = maxLines; i < lines.length; i++) {
+                    lines[i].remove();
+                }
+            }
+        }
     </script>
 </body>
 </html> 

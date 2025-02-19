@@ -9,12 +9,27 @@ import sys
 import time
 import json
 from eventlet import wsgi
-from flask import request
+from flask import request, session
 from flask_cors import CORS
+import redis
+from flask_session import Session
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Configure Redis
+redis_client = redis.Redis(
+    host='localhost',
+    port=6379,
+    db=0,
+    decode_responses=True
+)
+
+# Configure Flask session
+app.config['SESSION_TYPE'] = 'redis'
+app.config['SESSION_REDIS'] = redis_client
+Session(app)
 
 # Global state
 active_connections = {}
@@ -25,27 +40,11 @@ def cleanup_socket(sid):
     try:
         with connection_lock:
             if sid in active_connections:
-                # Get the socket instance
-                socket = active_connections[sid].get('socket')
-                
-                # Clean up rooms if they exist
-                if hasattr(socketio.server, 'rooms'):
-                    try:
-                        rooms = list(socketio.server.rooms(sid, '/'))
-                        for room in rooms:
-                            try:
-                                socketio.server.leave_room(sid, room, '/')
-                            except Exception:
-                                pass
-                    except Exception:
-                        pass
-                
-                # Close socket if it exists
-                if socket and hasattr(socket, 'close'):
-                    try:
-                        socket.close()
-                    except Exception:
-                        pass
+                # Remove from Redis
+                try:
+                    redis_client.delete(f"socket:{sid}")
+                except Exception as e:
+                    logger.error(f"Error removing socket from Redis: {e}")
                 
                 # Remove from active connections
                 active_connections.pop(sid, None)
@@ -76,12 +75,12 @@ socketio.init_app(
     app,
     async_mode='eventlet',
     cors_allowed_origins=["https://liqbot-038f.onrender.com"],
-    ping_timeout=60000,  # Increased timeout
-    ping_interval=25000,  # Increased interval
-    manage_session=True,  # Re-enable session management
-    message_queue=None,
+    ping_timeout=60000,
+    ping_interval=25000,
+    manage_session=True,
+    message_queue='redis://localhost:6379/0',
     always_connect=True,
-    transports=['polling'],  # Only use polling for now
+    transports=['polling'],
     cookie=None,
     logger=True,
     engineio_logger=True,
@@ -89,9 +88,9 @@ socketio.init_app(
     monitor_clients=True,
     upgrade_timeout=20000,
     max_http_buffer_size=1024 * 1024,
-    cors_credentials=False,
+    cors_credentials=True,
     cors_headers=['Content-Type', 'X-Requested-With'],
-    close_timeout=60000,  # Increased timeout
+    close_timeout=60000,
     max_queue_size=100,
     reconnection=True,
     reconnection_attempts=5,
@@ -101,7 +100,7 @@ socketio.init_app(
     retry_delay=1000,
     retry_delay_max=5000,
     ping_interval_grace_period=5000,
-    allow_upgrades=False,  # Disable upgrades for now
+    allow_upgrades=False,
     json=json,
     http_compression=False,
     compression_threshold=1024,
@@ -117,7 +116,7 @@ CORS(app, resources={
         "origins": ["https://liqbot-038f.onrender.com"],
         "methods": ["GET", "POST", "OPTIONS"],
         "allow_headers": ["Content-Type", "X-Requested-With"],
-        "supports_credentials": True,  # Enable credentials
+        "supports_credentials": True,
         "max_age": 3600
     }
 })
@@ -133,12 +132,16 @@ def handle_connect():
 
         logger.info(f"New connection: {sid}")
         
+        # Store session data in Redis
+        session_data = {
+            'connected_at': int(time.time()),
+            'last_heartbeat': int(time.time())
+        }
+        redis_client.hmset(f"socket:{sid}", session_data)
+        redis_client.expire(f"socket:{sid}", 3600)  # Expire after 1 hour
+        
         with connection_lock:
-            # Store connection info
-            active_connections[sid] = {
-                'connected_at': time.time(),
-                'last_heartbeat': time.time()
-            }
+            active_connections[sid] = session_data
             
         # Emit initial connection success
         socketio.emit('connection_status', {'status': 'connected'}, room=sid)
@@ -185,10 +188,21 @@ def handle_heartbeat():
     """Handle client heartbeat"""
     try:
         sid = request.sid
-        if sid in active_connections:
-            with connection_lock:
+        if not sid:
+            return
+            
+        # Update heartbeat in Redis
+        try:
+            redis_client.hset(f"socket:{sid}", "last_heartbeat", int(time.time()))
+            redis_client.expire(f"socket:{sid}", 3600)  # Reset expiration
+        except Exception as e:
+            logger.error(f"Error updating Redis heartbeat: {e}")
+            
+        with connection_lock:
+            if sid in active_connections:
                 active_connections[sid]['last_heartbeat'] = time.time()
-            socketio.emit('heartbeat_response', {'status': 'alive'}, room=sid)
+                
+        socketio.emit('heartbeat_response', {'status': 'alive'}, room=sid)
     except Exception as e:
         logger.error(f"Error in handle_heartbeat: {e}")
 
